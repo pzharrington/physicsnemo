@@ -182,7 +182,7 @@ def test_deterministic_sampler_scaling_validation(mock_net, scaling, pytestconfi
 # Test correctness with known ODE solution
 @import_or_fail("cftime")
 def test_deterministic_sampler_correctness(pytestconfig):
-    
+
     from physicsnemo.utils.generative import deterministic_sampler
 
     # Create a simple network that implements our ODE: dx/dt = -x ==> x(t) = exp(-t)
@@ -191,20 +191,22 @@ def test_deterministic_sampler_correctness(pytestconfig):
             super().__init__()
             self.sigma_min = sigma_min
             self.sigma_max = sigma_max
-            
+
         def forward(self, x, img_lr, sigma, class_labels=None):
             # Simulating ODE dx/dt = -x, we need denoiser to return (t + 1) * x
             # See EDM paper eqs. 3 and 4, and note EDM uses sigma <==> t
-            return (sigma + 1.) * x
-            
+            return (sigma + 1.0) * x
+
         def round_sigma(self, sigma):
             return torch.tensor(sigma)
 
     # Create network and initial condition
     net = SimpleODENet()
-    x0 = torch.exp(-net.sigma_max * torch.ones(1, 1, 1, 1))/net.sigma_max  # "Initial condition" x(sigma_max) = exp(-sigma_max)
-    img_lr = torch.zeros(1, 1, 1, 1)  # Dummy conditioning input    
-    
+    x0 = (
+        torch.exp(-net.sigma_max * torch.ones(1, 1, 1, 1)) / net.sigma_max
+    )  # "Initial condition" x(sigma_max) = exp(-sigma_max)
+    img_lr = torch.zeros(1, 1, 1, 1)  # Dummy conditioning input
+
     # Run the sampler
     x_final = deterministic_sampler(
         net=net,
@@ -214,10 +216,11 @@ def test_deterministic_sampler_correctness(pytestconfig):
         sigma_min=net.sigma_min,
         sigma_max=net.sigma_max,
     )
-    
+
     # Analytical solution of x(t) = exp(-t) at t=0 is 1
-    analytical_solution = torch.tensor(np.exp(0.))
-    
+    analytical_solution = torch.tensor(np.exp(0.0))
+
     # Check with loose tolerance since we're using numerical integration
-    assert torch.allclose(x_final, analytical_solution, rtol=1e-2, atol=1e-2), \
-        f"Numerical solution {x_final.item():.6f} does not match analytical solution {analytical_solution.item():.6f}"
+    assert torch.allclose(
+        x_final, analytical_solution, rtol=1e-2, atol=1e-2
+    ), f"Numerical solution {x_final.item():.6f} does not match analytical solution {analytical_solution.item():.6f}"
