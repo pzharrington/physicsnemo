@@ -218,7 +218,7 @@ def test_deterministic_sampler_correctness(pytestconfig):
     )
 
     # Analytical solution of x(t) = exp(-t) at t=0 is 1
-    analytical_solution = torch.tensor(np.exp(0.0))
+    analytical_solution = torch.ones_like(x_final)
 
     # Check with loose tolerance since we're using numerical integration
     assert torch.allclose(
