@@ -46,7 +46,9 @@ have_healpixpad = True
 try:
     from earth2grid.healpix._padding import pad as hpx_pad
 except ImportError:
-    warnings.warn("Cannot find earth2grid HEALPix padding op, falling back to slower implementation. Install earth2grid to use faster implementation: https://github.com/NVlabs/earth2grid.git")
+    warnings.warn(
+        "Cannot find earth2grid HEALPix padding op, falling back to slower implementation. Install earth2grid to use faster implementation: https://github.com/NVlabs/earth2grid.git"
+    )
     have_healpixpad = False
 
 
