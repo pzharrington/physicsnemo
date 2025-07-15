@@ -37,7 +37,6 @@ Details on the HEALPix can be found at https://iopscience.iop.org/article/10.108
 
 """
 
-import sys
 import warnings
 
 import torch
