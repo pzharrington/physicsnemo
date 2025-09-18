@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Migrated Stokes MGN example to PyTorch Geometric.
 - Migrated Lennard Jones example to PyTorch Geometric.
+- Refactored DiTBlock to be more modular
+- Added NATTEN 2D neighborhood attention backend for DiTBlock
 
 ### Deprecated
 
