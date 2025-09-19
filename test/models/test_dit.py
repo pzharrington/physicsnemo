@@ -231,7 +231,6 @@ def test_ditblock_forward_accuracy_timm(device):
         model,
         (x, c),
         file_name="ditblock_timm_output.pth",
-        atol=1e-5,
     )
 
 
@@ -271,7 +270,6 @@ def test_ditblock_forward_accuracy_natten(device, pytestconfig):
         model,
         (x, c),
         file_name="ditblock_natten_output.pth",
-        atol=1e-5,
     )
 
 
@@ -307,7 +305,6 @@ def test_ditblock_forward_accuracy_transformer_engine(device, pytestconfig):
         model,
         (x, c),
         file_name="ditblock_te_output.pth",
-        atol=1e-5,
     )
 
 
