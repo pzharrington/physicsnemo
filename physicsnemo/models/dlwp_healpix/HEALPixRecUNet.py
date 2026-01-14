@@ -115,7 +115,7 @@ class HEALPixRecUNet(Module):
         couplings: list = [],
     ):
         r"""Initialize the recurrent DLWP HEALPix UNet."""
-        super().__init__()
+        super().__init__(meta=MetaData())
         self.channel_dim = 2  # Now 2 with [B, F, T*C, H, W]. Was 1 in old data format with [B, T*C, F, H, W]
 
         self.input_channels = input_channels
@@ -446,12 +446,6 @@ class HEALPixRecUNet(Module):
             Model outputs shaped :math:`(B, F, T_{out}, C_{out}, H, W)`.
         """
         if not torch.compiler.is_compiling():
-            min_len = 3 if len(self.couplings) == 0 else 4
-            if len(inputs) < min_len:
-                raise ValueError(
-                    f"HEALPixRecUNet.forward expects at least {min_len} inputs "
-                    f"(got {len(inputs)})"
-                )
             if inputs[0].ndim != 6:
                 raise ValueError(
                     "HEALPixRecUNet.forward expects prognostics shaped "

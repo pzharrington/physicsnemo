@@ -15,15 +15,13 @@
 # limitations under the License.
 # ruff: noqa: E402
 
+import omegaconf
 import pytest
 import torch
 
 from physicsnemo.models.dlwp_healpix import HEALPixRecUNet
 from test import common
-from test.conftest import requires_module
 from test.models.graphcast.utils import fix_random_seeds
-
-omegaconf = pytest.importorskip("omegaconf")
 
 
 @pytest.fixture
@@ -164,7 +162,6 @@ def insolation_data():
     return generate_insolation_data
 
 
-@requires_module("omegaconf")
 def test_HEALPixRecUNet_initialize(device, encoder_dict, decoder_dict, pytestconfig):
     in_channels = 3
     out_channels = 3
@@ -268,7 +265,6 @@ def test_HEALPixRecUNet_initialize(device, encoder_dict, decoder_dict, pytestcon
     torch.cuda.empty_cache()
 
 
-@requires_module("omegaconf")
 def test_HEALPixRecUNet_integration_steps(
     device, encoder_dict, decoder_dict, pytestconfig
 ):
@@ -295,7 +291,6 @@ def test_HEALPixRecUNet_integration_steps(
     torch.cuda.empty_cache()
 
 
-@requires_module("omegaconf")
 @torch.no_grad()
 def test_HEALPixRecUNet_reset(
     device,
@@ -347,7 +342,6 @@ def test_HEALPixRecUNet_reset(
     torch.cuda.empty_cache()
 
 
-@requires_module("omegaconf")
 @torch.no_grad()
 def test_HEALPixRecUNet_forward(
     device,

@@ -182,7 +182,9 @@ def test_MaxPool_forward(device, test_data, pytestconfig):
     channels = 4
     maxpool_block = HEALPixMaxPool(pooling=pooling).to(device)
 
-    invar = test_data(faces=1, channels=channels, img_size=(size * pooling), device=device)
+    invar = test_data(
+        faces=1, channels=channels, img_size=(size * pooling), device=device
+    )
     outvar = test_data(faces=1, channels=channels, img_size=size, device=device)
 
     assert common.compare_output(outvar, maxpool_block(invar))
@@ -202,7 +204,9 @@ def test_AvgPool_forward(device, test_data, pytestconfig):
     channels = 4
     avgpool_block = HEALPixAvgPool(pooling=pooling).to(device)
 
-    invar = test_data(faces=1, channels=channels, img_size=(size * pooling), device=device)
+    invar = test_data(
+        faces=1, channels=channels, img_size=(size * pooling), device=device
+    )
     outvar = test_data(faces=1, channels=channels, img_size=size, device=device)
 
     outvar = outvar * 0.5

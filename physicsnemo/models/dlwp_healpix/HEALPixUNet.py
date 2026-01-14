@@ -109,7 +109,7 @@ class HEALPixUNet(Module):
         couplings: list = [],
     ):
         r"""Initialize the DLWP HEALPix UNet."""
-        super().__init__()
+        super().__init__(meta=MetaData())
 
         if len(couplings) > 0:
             if n_constants == 0:
@@ -371,16 +371,9 @@ class HEALPixUNet(Module):
             Model outputs shaped :math:`(B, F, T_{out}, C_{out}, H, W)`.
         """
         if not torch.compiler.is_compiling():
-            min_len = 3 if len(self.couplings) == 0 else 4
-            if len(inputs) < min_len:
-                raise ValueError(
-                    f"HEALPixUNet.forward expects at least {min_len} inputs "
-                    f"(got {len(inputs)})"
-                )
             if inputs[0].ndim != 6:
                 raise ValueError(
-                    "HEALPixUNet.forward expects prognostics shaped "
-                    "(B, F, T, C, H, W)"
+                    "HEALPixUNet.forward expects prognostics shaped (B, F, T, C, H, W)"
                 )
 
         outputs = []

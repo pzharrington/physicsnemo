@@ -15,15 +15,13 @@
 # limitations under the License.
 # ruff: noqa: E402
 
+import omegaconf
 import pytest
 import torch
 
 from physicsnemo.models.dlwp_healpix import HEALPixUNet
 from test import common
-from test.conftest import requires_module
 from test.models.graphcast.utils import fix_random_seeds
-
-omegaconf = pytest.importorskip("omegaconf")
 
 
 @pytest.fixture
@@ -152,7 +150,6 @@ def unet_decoder_dict(
     return omegaconf.DictConfig(decoder)
 
 
-@requires_module("omegaconf")
 def test_HEALPixUNet_initialize(
     device, unet_encoder_dict, unet_decoder_dict, pytestconfig
 ):
@@ -228,7 +225,6 @@ def test_HEALPixUNet_initialize(
     torch.cuda.empty_cache()
 
 
-@requires_module("omegaconf")
 def test_HEALPixUNet_integration_steps(
     device, unet_encoder_dict, unet_decoder_dict, pytestconfig
 ):
@@ -255,7 +251,6 @@ def test_HEALPixUNet_integration_steps(
     torch.cuda.empty_cache()
 
 
-@requires_module("omegaconf")
 def test_HEALPixUNet_forward(
     device,
     unet_encoder_dict,
@@ -355,7 +350,7 @@ def test_HEALPixUNet_forward(
     )
 
     # no constants and no decoder inputs
-    inputs = [x, decoder_inputs]
+    inputs = [x]
     model = HEALPixUNet(
         encoder=unet_encoder_dict,
         decoder=unet_decoder_dict,

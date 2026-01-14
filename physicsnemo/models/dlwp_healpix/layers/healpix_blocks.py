@@ -18,7 +18,6 @@ from typing import Sequence, Tuple, Union
 
 import torch
 
-from physicsnemo import Module
 from physicsnemo.nn import HEALPixLayer
 
 #
@@ -26,7 +25,7 @@ from physicsnemo.nn import HEALPixLayer
 #
 
 
-class ConvGRUBlock(Module):
+class ConvGRUBlock(torch.nn.Module):
     """Class that implements a Convolutional GRU
     Code modified from
     https://github.com/happyjin/ConvGRU-pytorch/blob/master/convGRU.py
@@ -118,7 +117,7 @@ class ConvGRUBlock(Module):
 #
 
 
-class BasicConvBlock(Module):
+class BasicConvBlock(torch.nn.Module):
     """Convolution block consisting of n subsequent convolutions and activations"""
 
     def __init__(
@@ -194,7 +193,7 @@ class BasicConvBlock(Module):
         return self.convblock(x)
 
 
-class ConvNeXtBlock(Module):
+class ConvNeXtBlock(torch.nn.Module):
     """Class implementing a modified ConvNeXt network as described in https://arxiv.org/pdf/2201.03545.pdf
     and shown in figure 4
     """
@@ -310,7 +309,7 @@ class ConvNeXtBlock(Module):
         return self.skip_module(x) + self.convblock(x)
 
 
-class DoubleConvNeXtBlock(Module):
+class DoubleConvNeXtBlock(torch.nn.Module):
     """Modification of ConvNeXtBlock block this time putting two sequentially
     in a single block with the number of channels in the middle being the
     number of latent channels
@@ -494,7 +493,7 @@ class DoubleConvNeXtBlock(Module):
         return self.skip_module2(x1) + self.convblock2(x1)
 
 
-class Multi_SymmetricConvNeXtBlock(Module):
+class Multi_SymmetricConvNeXtBlock(torch.nn.Module):
     """
     Class for creating multi-block SymmetricConvNeXtBlock. Defaults to all SymmetricConvNeXtBlocks having same parameters
     """
@@ -550,7 +549,7 @@ class Multi_SymmetricConvNeXtBlock(Module):
         return out
 
 
-class SymmetricConvNeXtBlock(Module):
+class SymmetricConvNeXtBlock(torch.nn.Module):
     """Another modification of ConvNeXtBlock block this time using 4 layers and adding
     a layer that instead of going from in_channels to latent*upscale channesl goes to
     latent channels first
@@ -690,7 +689,7 @@ class SymmetricConvNeXtBlock(Module):
 #
 
 
-class TransposedConvUpsample(Module):
+class TransposedConvUpsample(torch.nn.Module):
     """This class provides a wrapper for a HEALPix (or other) tensor data
     around the torch.nn.ConvTranspose2d class.
     """
@@ -763,7 +762,7 @@ class TransposedConvUpsample(Module):
 #
 
 
-class Interpolate(Module):
+class Interpolate(torch.nn.Module):
     """Helper class that handles interpolation
     This is done as a class so that scale and mode can be stored
     """

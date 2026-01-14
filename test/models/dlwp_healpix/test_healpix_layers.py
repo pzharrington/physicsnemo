@@ -20,12 +20,10 @@ import sys
 script_path = os.path.abspath(__file__)
 sys.path.append(os.path.join(os.path.dirname(script_path), ".."))
 
-import numpy as np
 import pytest
 import torch
 
 from test import common
-from test.conftest import requires_module
 
 
 class MulX(torch.nn.Module):
@@ -49,7 +47,6 @@ HEALPixLayer_testdata = [
 ]
 
 
-@requires_module("hydra")
 @pytest.mark.parametrize("multiplier", [2, 3, 4])
 def test_HEALPixLayer_initialization(device, multiplier, pytestconfig):
     from physicsnemo.nn import (
@@ -60,7 +57,6 @@ def test_HEALPixLayer_initialization(device, multiplier, pytestconfig):
     assert isinstance(layer, HEALPixLayer)
 
 
-@requires_module("hydra")
 @pytest.mark.parametrize("multiplier", [2, 3, 4])
 def test_HEALPixLayer_forward(device, multiplier, pytestconfig):
     from physicsnemo.nn import (

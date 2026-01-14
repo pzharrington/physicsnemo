@@ -16,15 +16,11 @@
 
 """Reusable HEALPix tensor utilities and padding layers."""
 
-from __future__ import annotations
-
 import importlib
-from typing import Optional
 
 import torch
 from jaxtyping import Float
 
-from physicsnemo import Module
 from physicsnemo.core.version_check import check_version_spec
 
 HEALPIXPAD_AVAILABLE = check_version_spec("earth2grid", "0.1.0", hard_fail=False)
@@ -48,7 +44,7 @@ def _raise_shape_error(name: str, tensor: torch.Tensor, message: str) -> None:
     )
 
 
-class HEALPixFoldFaces(Module):
+class HEALPixFoldFaces(torch.nn.Module):
     r"""
     Fold the face dimension of a HEALPix tensor into the batch dimension.
 
@@ -107,7 +103,7 @@ class HEALPixFoldFaces(Module):
         return folded
 
 
-class HEALPixUnfoldFaces(Module):
+class HEALPixUnfoldFaces(torch.nn.Module):
     r"""
     Unfold a folded HEALPix tensor back to a face-major representation.
 
@@ -169,10 +165,12 @@ class HEALPixUnfoldFaces(Module):
 
         batch_faces, channels, height, width = tensor.shape
         batch = batch_faces // self.num_faces
-        return torch.reshape(tensor, shape=(batch, self.num_faces, channels, height, width))
+        return torch.reshape(
+            tensor, shape=(batch, self.num_faces, channels, height, width)
+        )
 
 
-class HEALPixPaddingv2(Module):
+class HEALPixPaddingv2(torch.nn.Module):
     r"""
     Accelerated padding layer for HEALPix data using the optional ``earth2grid`` backend.
 
@@ -235,7 +233,7 @@ class HEALPixPaddingv2(Module):
         return result
 
 
-class HEALPixPadding(Module):
+class HEALPixPadding(torch.nn.Module):
     r"""
     Reference padding layer for data on a HEALPix sphere.
 
@@ -498,7 +496,7 @@ class HEALPixPadding(Module):
         return ret
 
 
-class HEALPixLayer(Module):
+class HEALPixLayer(torch.nn.Module):
     r"""
     Wrapper that applies an arbitrary 2D layer to each HEALPix face independently.
 
@@ -586,13 +584,13 @@ class HEALPixLayer(Module):
         return self.layers(x)
 
 
-class HEALPixMaxPool(Module):
+class HEALPixMaxPool(torch.nn.Module):
     r"""
     HEALPix-aware max pooling wrapper around ``torch.nn.MaxPool2d``.
 
     Parameters
     ----------
-    geometry_layer : Module, optional
+    geometry_layer : torch.nn.Module, optional
         Wrapper that applies pooling per HEALPix face. Defaults to :class:`HEALPixLayer`.
     pooling : int, optional
         Kernel size and stride for pooling. Defaults to ``2``.
@@ -614,7 +612,7 @@ class HEALPixMaxPool(Module):
 
     def __init__(
         self,
-        geometry_layer: Module = HEALPixLayer,
+        geometry_layer: torch.nn.Module = HEALPixLayer,
         pooling: int = 2,
         enable_nhwc: bool = False,
         enable_healpixpad: bool = False,
@@ -633,13 +631,13 @@ class HEALPixMaxPool(Module):
         return self.maxpool(x)
 
 
-class HEALPixAvgPool(Module):
+class HEALPixAvgPool(torch.nn.Module):
     r"""
     HEALPix-aware average pooling wrapper around ``torch.nn.AvgPool2d``.
 
     Parameters
     ----------
-    geometry_layer : Module, optional
+    geometry_layer : torch.nn.Module, optional
         Wrapper that applies pooling per HEALPix face. Defaults to :class:`HEALPixLayer`.
     pooling : int, optional
         Kernel size and stride for pooling. Defaults to ``2``.
@@ -661,7 +659,7 @@ class HEALPixAvgPool(Module):
 
     def __init__(
         self,
-        geometry_layer: Module = HEALPixLayer,
+        geometry_layer: torch.nn.Module = HEALPixLayer,
         pooling: int = 2,
         enable_nhwc: bool = False,
         enable_healpixpad: bool = False,

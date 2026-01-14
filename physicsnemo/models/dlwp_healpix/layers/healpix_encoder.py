@@ -20,9 +20,8 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 
-from physicsnemo import Module
 
-class UNetEncoder(Module):
+class UNetEncoder(torch.nn.Module):
     """Generic UNetEncoder that can be applied to arbitrary meshes."""
 
     def __init__(

@@ -16,6 +16,16 @@
 
 """DLWP HEALPix model building blocks."""
 
+from physicsnemo.nn import (
+    HEALPixAvgPool,
+    HEALPixFoldFaces,
+    HEALPixLayer,
+    HEALPixMaxPool,
+    HEALPixPadding,
+    HEALPixPaddingv2,
+    HEALPixUnfoldFaces,
+)
+
 from .healpix_blocks import (
     BasicConvBlock,
     ConvGRUBlock,
@@ -28,15 +38,6 @@ from .healpix_blocks import (
 )
 from .healpix_decoder import UNetDecoder
 from .healpix_encoder import UNetEncoder
-from physicsnemo.nn import (
-    HEALPixFoldFaces,
-    HEALPixLayer,
-    HEALPixPadding,
-    HEALPixPaddingv2,
-    HEALPixUnfoldFaces,
-    HEALPixMaxPool,
-    HEALPixAvgPool,
-)
 
 __all__ = [
     "BasicConvBlock",
