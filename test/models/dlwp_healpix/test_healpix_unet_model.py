@@ -33,7 +33,7 @@ def conv_next_block_dict(in_channels=3, out_channels=1):
         "cap_value": 10,
     }
     conv_block = {
-        "_target_": "physicsnemo.models.dlwp_healpix_layers.ConvNeXtBlock",
+        "_target_": "physicsnemo.models.dlwp_healpix.layers.ConvNeXtBlock",
         "in_channels": in_channels,
         "out_channels": out_channels,
         "activation": activation_block,
@@ -48,7 +48,7 @@ def conv_next_block_dict(in_channels=3, out_channels=1):
 @pytest.fixture
 def down_sampling_block_dict():
     down_sampling_block = {
-        "_target_": "physicsnemo.models.dlwp_healpix_layers.AvgPool",
+        "_target_": "physicsnemo.nn.healpix.HEALPixAvgPool",
         "pooling": 2,
     }
     return down_sampling_block
@@ -62,7 +62,7 @@ def up_sampling_block_dict(in_channels=3, out_channels=1):
         "cap_value": 10,
     }
     up_sampling_block = {
-        "_target_": "physicsnemo.models.dlwp_healpix_layers.TransposedConvUpsample",
+        "_target_": "physicsnemo.models.dlwp_healpix.layers.TransposedConvUpsample",
         "in_channels": in_channels,
         "out_channels": out_channels,
         "activation": activation_block,
@@ -74,7 +74,7 @@ def up_sampling_block_dict(in_channels=3, out_channels=1):
 @pytest.fixture
 def output_layer_dict(in_channels=3, out_channels=2):
     output_layer = {
-        "_target_": "physicsnemo.models.dlwp_healpix_layers.BasicConvBlock",
+        "_target_": "physicsnemo.models.dlwp_healpix.layers.BasicConvBlock",
         "in_channels": in_channels,
         "out_channels": out_channels,
         "kernel_size": 1,
@@ -123,7 +123,7 @@ def insolation_data():
 def unet_encoder_dict(conv_next_block_dict, down_sampling_block_dict):
     """Encoder dict fixture."""
     encoder = {
-        "_target_": "physicsnemo.models.dlwp_healpix_layers.UNetEncoder",
+        "_target_": "physicsnemo.models.dlwp_healpix.layers.UNetEncoder",
         "conv_block": conv_next_block_dict,
         "down_sampling_block": down_sampling_block_dict,
         "_recursive_": False,
@@ -141,7 +141,7 @@ def unet_decoder_dict(
 ):
     """Decoder dict fixture."""
     decoder = {
-        "_target_": "physicsnemo.models.dlwp_healpix_layers.UNetDecoder",
+        "_target_": "physicsnemo.models.dlwp_healpix.layers.UNetDecoder",
         "conv_block": conv_next_block_dict,
         "up_sampling_block": up_sampling_block_dict,
         "output_layer": output_layer_dict,

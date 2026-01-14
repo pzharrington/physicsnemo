@@ -14,24 +14,46 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""DLWP HEALPix model building blocks."""
+
 from .healpix_blocks import (
-    AvgPool,
     BasicConvBlock,
     ConvGRUBlock,
     ConvNeXtBlock,
     DoubleConvNeXtBlock,
     Interpolate,
-    MaxPool,
     Multi_SymmetricConvNeXtBlock,
     SymmetricConvNeXtBlock,
     TransposedConvUpsample,
 )
 from .healpix_decoder import UNetDecoder
 from .healpix_encoder import UNetEncoder
-from .healpix_layers import (
+from physicsnemo.nn import (
     HEALPixFoldFaces,
     HEALPixLayer,
     HEALPixPadding,
     HEALPixPaddingv2,
     HEALPixUnfoldFaces,
+    HEALPixMaxPool,
+    HEALPixAvgPool,
 )
+
+__all__ = [
+    "BasicConvBlock",
+    "ConvGRUBlock",
+    "ConvNeXtBlock",
+    "DoubleConvNeXtBlock",
+    "Interpolate",
+    "Multi_SymmetricConvNeXtBlock",
+    "SymmetricConvNeXtBlock",
+    "TransposedConvUpsample",
+    "UNetDecoder",
+    "UNetEncoder",
+    "HEALPixFoldFaces",
+    "HEALPixLayer",
+    "HEALPixPadding",
+    "HEALPixPaddingv2",
+    "HEALPixUnfoldFaces",
+    "HEALPixMaxPool",
+    "HEALPixAvgPool",
+]

@@ -42,7 +42,7 @@ def test_data():
 
 @requires_module("hydra")
 def test_ConvGRUBlock_initialization(device, test_data, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
+    from physicsnemo.models.dlwp_healpix.layers import (
         ConvGRUBlock,
     )
 
@@ -53,7 +53,7 @@ def test_ConvGRUBlock_initialization(device, test_data, pytestconfig):
 
 @requires_module("hydra")
 def test_ConvGRUBlock_forward(device, test_data, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
+    from physicsnemo.models.dlwp_healpix.layers import (
         ConvGRUBlock,
     )
 
@@ -75,7 +75,7 @@ def test_ConvGRUBlock_forward(device, test_data, pytestconfig):
 
 @requires_module("hydra")
 def test_ConvNeXtBlock_initialization(device, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
+    from physicsnemo.models.dlwp_healpix.layers import (
         ConvNeXtBlock,
     )
 
@@ -95,7 +95,7 @@ def test_ConvNeXtBlock_initialization(device, pytestconfig):
 
 @requires_module("hydra")
 def test_ConvNeXtBlock_forward(device, test_data, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
+    from physicsnemo.models.dlwp_healpix.layers import (
         ConvNeXtBlock,
     )
 
@@ -122,7 +122,7 @@ def test_ConvNeXtBlock_forward(device, test_data, pytestconfig):
 
 @requires_module("hydra")
 def test_DoubleConvNeXtBlock_initialization(device, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
+    from physicsnemo.models.dlwp_healpix.layers import (
         DoubleConvNeXtBlock,
     )
 
@@ -148,7 +148,7 @@ def test_DoubleConvNeXtBlock_initialization(device, pytestconfig):
 
 @requires_module("hydra")
 def test_DoubleConvNeXtBlock_forward(device, test_data, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
+    from physicsnemo.models.dlwp_healpix.layers import (
         DoubleConvNeXtBlock,
     )
 
@@ -182,7 +182,7 @@ def test_DoubleConvNeXtBlock_forward(device, test_data, pytestconfig):
 
 @requires_module("hydra")
 def test_SymmetricConvNeXtBlock_initialization(device, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
+    from physicsnemo.models.dlwp_healpix.layers import (
         SymmetricConvNeXtBlock,
     )
 
@@ -205,7 +205,7 @@ def test_SymmetricConvNeXtBlock_initialization(device, pytestconfig):
 
 @requires_module("hydra")
 def test_SymmetricConvNeXtBlock_forward(device, test_data, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
+    from physicsnemo.models.dlwp_healpix.layers import (
         SymmetricConvNeXtBlock,
     )
 
@@ -227,7 +227,7 @@ def test_SymmetricConvNeXtBlock_forward(device, test_data, pytestconfig):
 
 @requires_module("hydra")
 def test_Multi_SymmetricConvNeXtBlock_initialization(device, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
+    from physicsnemo.models.dlwp_healpix.layers import (
         Multi_SymmetricConvNeXtBlock,
     )
 
@@ -243,7 +243,7 @@ def test_Multi_SymmetricConvNeXtBlock_initialization(device, pytestconfig):
 
 @requires_module("hydra")
 def test_Multi_SymmetricConvNeXtBlock_forward(device, test_data, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
+    from physicsnemo.models.dlwp_healpix.layers import (
         Multi_SymmetricConvNeXtBlock,
     )
 
@@ -267,7 +267,7 @@ def test_Multi_SymmetricConvNeXtBlock_forward(device, test_data, pytestconfig):
 
 @requires_module("hydra")
 def test_BasicConvBlock_initialization(device, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
+    from physicsnemo.models.dlwp_healpix.layers import (
         BasicConvBlock,
     )
 
@@ -292,7 +292,7 @@ def test_BasicConvBlock_initialization(device, pytestconfig):
 
 @requires_module("hydra")
 def test_BasicConvBlock_forward(device, test_data, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
+    from physicsnemo.models.dlwp_healpix.layers import (
         BasicConvBlock,
     )
 
@@ -315,71 +315,8 @@ def test_BasicConvBlock_forward(device, test_data, pytestconfig):
 
 
 @requires_module("hydra")
-def test_MaxPool_initialization(device, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
-        MaxPool,
-    )
-
-    pooling = 2
-    maxpool_block = MaxPool(pooling=pooling).to(device)
-    assert isinstance(maxpool_block, MaxPool)
-
-
-@requires_module("hydra")
-def test_MaxPool_forward(device, test_data, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
-        MaxPool,
-    )
-
-    pooling = 2
-    size = 16
-    channels = 4
-    maxpool_block = MaxPool(pooling=pooling).to(device)
-
-    invar = test_data(
-        faces=1, channels=channels, img_size=(size * pooling), device=device
-    )
-    outvar = test_data(faces=1, channels=channels, img_size=size, device=device)
-
-    assert common.compare_output(outvar, maxpool_block(invar))
-
-
-@requires_module("hydra")
-def test_AvgPool_initialization(device, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
-        AvgPool,
-    )
-
-    pooling = 2
-    avgpool_block = AvgPool(pooling=pooling).to(device)
-    assert isinstance(avgpool_block, AvgPool)
-
-
-@requires_module("hydra")
-def test_AvgPool_forward(device, test_data, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
-        AvgPool,
-    )
-
-    pooling = 2
-    size = 32
-    channels = 4
-    avgpool_block = AvgPool(pooling=pooling).to(device)
-
-    invar = test_data(
-        faces=1, channels=channels, img_size=(size * pooling), device=device
-    )
-    outvar = test_data(faces=1, channels=channels, img_size=size, device=device)
-
-    # averaging across 1,0
-    outvar = outvar * 0.5
-
-    assert common.compare_output(outvar, avgpool_block(invar))
-
-
-@requires_module("hydra")
 def test_TransposedConvUpsample_initialization(device, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
+    from physicsnemo.models.dlwp_healpix.layers import (
         TransposedConvUpsample,  #
     )
 
@@ -394,7 +331,7 @@ def test_TransposedConvUpsample_initialization(device, pytestconfig):
 
 @requires_module("hydra")
 def test_TransposedConvUpsample_forward(device, test_data, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
+    from physicsnemo.models.dlwp_healpix.layers import (
         TransposedConvUpsample,
     )
 
@@ -424,7 +361,7 @@ def test_TransposedConvUpsample_forward(device, test_data, pytestconfig):
 
 @requires_module("hydra")
 def test_Interpolate_initialization(device, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
+    from physicsnemo.models.dlwp_healpix.layers import (
         Interpolate,
     )
 
@@ -436,7 +373,7 @@ def test_Interpolate_initialization(device, pytestconfig):
 
 @requires_module("hydra")
 def test_Interpolate_forward(device, pytestconfig):
-    from physicsnemo.models.dlwp_healpix_layers import (
+    from physicsnemo.models.dlwp_healpix.layers import (
         Interpolate,
     )
 

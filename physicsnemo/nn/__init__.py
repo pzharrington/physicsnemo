@@ -31,6 +31,15 @@ from .attention_layers import (
     EarthAttention3D,
     UNetAttention,
 )
+from .healpix import (
+    HEALPixAvgPool,
+    HEALPixFoldFaces,
+    HEALPixLayer,
+    HEALPixPadding,
+    HEALPixPaddingv2,
+    HEALPixUnfoldFaces,
+    HEALPixMaxPool,
+)
 from .ball_query import BQWarp
 from .conv_layers import (
     Conv2d,
