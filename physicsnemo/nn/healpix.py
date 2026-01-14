@@ -76,8 +76,8 @@ class HEALPixFoldFaces(torch.nn.Module):
         self.enable_nhwc = enable_nhwc
 
     def forward(
-        self, tensor: Float[torch.Tensor, "batch faces channels height width"] # noqa: F722
-    ) -> Float[torch.Tensor, "batch_faces channels height width"]: # noqa: F722
+        self, tensor: Float[torch.Tensor, "batch faces channels height width"]
+    ) -> Float[torch.Tensor, "batch_faces channels height width"]:
         r"""
         Fold the face dimension into the batch dimension.
 
@@ -138,8 +138,8 @@ class HEALPixUnfoldFaces(torch.nn.Module):
         self.enable_nhwc = enable_nhwc
 
     def forward(
-        self, tensor: Float[torch.Tensor, "batch_faces channels height width"] # noqa: F722
-    ) -> Float[torch.Tensor, "batch faces channels height width"]: # noqa: F722
+        self, tensor: Float[torch.Tensor, "batch_faces channels height width"]
+    ) -> Float[torch.Tensor, "batch faces channels height width"]:
         r"""
         Unfold a tensor by restoring its explicit face dimension.
 
@@ -205,8 +205,8 @@ class HEALPixPaddingv2(torch.nn.Module):
         self.padding = padding
 
     def forward(
-        self, x: Float[torch.Tensor, "batch_faces channels height width"] # noqa: F722
-    ) -> Float[torch.Tensor, "batch_faces channels padded_height padded_width"]: # noqa: F722
+        self, x: Float[torch.Tensor, "batch_faces channels height width"]
+    ) -> Float[torch.Tensor, "batch_faces channels padded_height padded_width"]:
         r"""
         Apply HEALPix-aware padding using the ``earth2grid`` CUDA backend.
 
@@ -278,8 +278,8 @@ class HEALPixPadding(torch.nn.Module):
         self.unfold = HEALPixUnfoldFaces(num_faces=12, enable_nhwc=self.enable_nhwc)
 
     def forward(
-        self, data: Float[torch.Tensor, "batch_faces channels height width"] # noqa: F722
-    ) -> Float[torch.Tensor, "batch_faces channels padded_height padded_width"]: # noqa: F722
+        self, data: Float[torch.Tensor, "batch_faces channels height width"]
+    ) -> Float[torch.Tensor, "batch_faces channels padded_height padded_width"]:
         r"""
         Pad each face consistently with its neighbors on the HEALPix grid.
 
@@ -562,8 +562,8 @@ class HEALPixLayer(torch.nn.Module):
             self.layers = self.layers.to(memory_format=torch.channels_last)
 
     def forward(
-        self, x: Float[torch.Tensor, "... faces channels height width"] # noqa: F722
-    ) -> Float[torch.Tensor, "... faces channels height width"]: # noqa: F722
+        self, x: Float[torch.Tensor, "... faces channels height width"]
+    ) -> Float[torch.Tensor, "... faces channels height width"]:
         r"""
         Apply the wrapped layer face-wise to a HEALPix tensor.
 
@@ -626,8 +626,8 @@ class HEALPixMaxPool(torch.nn.Module):
         )
 
     def forward(
-        self, x: Float[torch.Tensor, "... faces channels height width"] # noqa: F722
-    ) -> Float[torch.Tensor, "... faces channels pooled_height pooled_width"]: # noqa: F722
+        self, x: Float[torch.Tensor, "... faces channels height width"]
+    ) -> Float[torch.Tensor, "... faces channels pooled_height pooled_width"]:
         return self.maxpool(x)
 
 
@@ -673,6 +673,6 @@ class HEALPixAvgPool(torch.nn.Module):
         )
 
     def forward(
-        self, x: Float[torch.Tensor, "... faces channels height width"] # noqa: F722
-    ) -> Float[torch.Tensor, "... faces channels pooled_height pooled_width"]: # noqa: F722
+        self, x: Float[torch.Tensor, "... faces channels height width"]
+    ) -> Float[torch.Tensor, "... faces channels pooled_height pooled_width"]:
         return self.avgpool(x)
