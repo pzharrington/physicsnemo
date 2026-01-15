@@ -58,3 +58,90 @@ __all__ = [
     "HEALPixMaxPool",
     "HEALPixAvgPool",
 ]
+
+
+# Remapping methods for backwards compatibility of legacy checkpoints
+
+
+def _remap_target(target: str) -> str:
+    explicit = {
+        "physicsnemo.models.dlwp_healpix_layers.healpix_encoder.UNetEncoder": "physicsnemo.models.dlwp_healpix.layers.UNetEncoder",
+        "physicsnemo.models.dlwp_healpix_layers.healpix_decoder.UNetDecoder": "physicsnemo.models.dlwp_healpix.layers.UNetDecoder",
+    }
+    if target in explicit:
+        return explicit[target]
+
+    if target.startswith("physicsnemo.models.dlwp_healpix_layers.healpix_blocks."):
+        cls_name = target.split(".")[-1]
+        if cls_name == "AvgPool":
+            return "physicsnemo.nn.healpix.HEALPixAvgPool"
+        if cls_name == "MaxPool":
+            return "physicsnemo.nn.healpix.HEALPixMaxPool"
+        return f"physicsnemo.models.dlwp_healpix.layers.{cls_name}"
+
+    if target.startswith("physicsnemo.models.dlwp_healpix_layers.healpix_encoder."):
+        cls_name = target.split(".")[-1]
+        return f"physicsnemo.models.dlwp_healpix.layers.{cls_name}"
+
+    if target.startswith("physicsnemo.models.dlwp_healpix_layers.healpix_decoder."):
+        cls_name = target.split(".")[-1]
+        return f"physicsnemo.models.dlwp_healpix.layers.{cls_name}"
+
+    if target.startswith("physicsnemo.models.dlwp_healpix_layers.healpix_layers."):
+        cls_name = target.split(".")[-1]
+        return f"physicsnemo.nn.healpix.{cls_name}"
+
+    if target.startswith("physicsnemo.models.dlwp_healpix_layers."):
+        cls_name = target.split(".")[-1]
+        if cls_name == "AvgPool":
+            return "physicsnemo.nn.healpix.HEALPixAvgPool"
+        if cls_name == "MaxPool":
+            return "physicsnemo.nn.healpix.HEALPixMaxPool"
+        if cls_name.startswith("HEALPix"):
+            return f"physicsnemo.nn.healpix.{cls_name}"
+        return f"physicsnemo.models.dlwp_healpix.layers.{cls_name}"
+
+    if target.startswith("physicsnemo.models.dlwp_healpix.layers.healpix_blocks."):
+        cls_name = target.split(".")[-1]
+        if cls_name == "AvgPool":
+            return "physicsnemo.nn.healpix.HEALPixAvgPool"
+        if cls_name == "MaxPool":
+            return "physicsnemo.nn.healpix.HEALPixMaxPool"
+        return f"physicsnemo.models.dlwp_healpix.layers.{cls_name}"
+
+    if target.startswith("physicsnemo.models.dlwp_healpix.layers.healpix_encoder."):
+        cls_name = target.split(".")[-1]
+        return f"physicsnemo.models.dlwp_healpix.layers.{cls_name}"
+
+    if target.startswith("physicsnemo.models.dlwp_healpix.layers.healpix_decoder."):
+        cls_name = target.split(".")[-1]
+        return f"physicsnemo.models.dlwp_healpix.layers.{cls_name}"
+
+    if target.startswith("physicsnemo.models.layers.activations"):
+        cls_name = target.split(".")[-1]
+        return f"physicsnemo.nn.activations.{cls_name}"
+
+    return target
+
+
+def _remap_obj(obj):
+    from omegaconf import DictConfig, OmegaConf
+
+    if isinstance(obj, DictConfig):
+        container = OmegaConf.to_container(obj, resolve=False)
+        remapped = _remap_obj(container)
+        return OmegaConf.create(remapped)
+    if isinstance(obj, dict):
+        out = {}
+        for key, value in obj.items():
+            if key == "_target_" and isinstance(value, str):
+                out[key] = _remap_target(value)
+            else:
+                out[key] = _remap_obj(value)
+        return out
+    if isinstance(obj, list):
+        return [_remap_obj(value) for value in obj]
+    return obj
+
+
+_legacy_hydra_targets_warning = "Automatically converting legacy checkpoint with deprecated `dlwp_healpix_layers` Hydra targets. Please update by saving a new checkpoint after loading the legacy checkpoint."

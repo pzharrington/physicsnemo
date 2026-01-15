@@ -16,7 +16,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Any, Dict, Sequence
 
 import torch
 from hydra.utils import instantiate
@@ -25,6 +25,8 @@ from omegaconf import DictConfig
 from physicsnemo.core.meta import ModelMetaData
 from physicsnemo.core.module import Module
 from physicsnemo.nn import HEALPixFoldFaces, HEALPixUnfoldFaces
+
+from .layers import _legacy_hydra_targets_warning, _remap_obj
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +94,36 @@ class HEALPixUNet(Module):
         Predictions shaped :math:`(B, F, T_{out}, C_{out}, H, W)`.
 
     """
+
+    __model_checkpoint_version__ = "0.2.0"
+    __supported_model_checkpoint_version__ = {
+        "0.1.0": _legacy_hydra_targets_warning,
+    }
+
+    @classmethod
+    def _backward_compat_arg_mapper(
+        cls, version: str, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        r"""
+        Map arguments from older checkpoints to the current format.
+
+        Parameters
+        ----------
+        version : str
+            Version of the checkpoint being loaded.
+        args : Dict[str, Any]
+            Arguments dictionary from the checkpoint.
+
+        Returns
+        -------
+        Dict[str, Any]
+            Updated arguments dictionary compatible with the current version.
+        """
+        args = super()._backward_compat_arg_mapper(version, args)
+        if version != "0.1.0":
+            return args
+
+        return _remap_obj(args)
 
     def __init__(
         self,
