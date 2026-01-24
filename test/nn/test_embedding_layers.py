@@ -31,7 +31,7 @@ CONFIGS = [
         "freq_embed_dim": None,
         "mlp_hidden_dim": None,
         "embed_fn": "cos_sin",
-    }, # default
+    },  # default
     {
         "num_channels": 128,
         "max_positions": 10000,
@@ -51,6 +51,7 @@ CONFIGS = [
         "embed_fn": "np_sin_cos",
     },
 ]
+
 
 @pytest.mark.parametrize("config", CONFIGS)
 @pytest.mark.parametrize("batch_size", [1, 4, 17])
