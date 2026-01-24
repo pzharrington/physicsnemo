@@ -207,19 +207,7 @@ class HEALPixPaddingv2(torch.nn.Module):
     def forward(
         self, x: Float[torch.Tensor, "batch_faces channels height width"]
     ) -> Float[torch.Tensor, "batch_faces channels padded_height padded_width"]:
-        r"""
-        Apply HEALPix-aware padding using the ``earth2grid`` CUDA backend.
-
-        Parameters
-        ----------
-        x : torch.Tensor
-            Folded tensor of shape :math:`(B \cdot F, C, H, W)`.
-
-        Returns
-        -------
-        torch.Tensor
-            Padded tensor of shape :math:`(B \cdot F, C, H + 2p, W + 2p)`.
-        """
+        r"""Apply HEALPix-aware padding using the ``earth2grid`` CUDA backend."""
         if torch.cuda.is_available():
             torch.cuda.nvtx.range_push("HEALPixPaddingv2:forward")
 
@@ -280,19 +268,7 @@ class HEALPixPadding(torch.nn.Module):
     def forward(
         self, data: Float[torch.Tensor, "batch_faces channels height width"]
     ) -> Float[torch.Tensor, "batch_faces channels padded_height padded_width"]:
-        r"""
-        Pad each face consistently with its neighbors on the HEALPix grid.
-
-        Parameters
-        ----------
-        data : torch.Tensor
-            Folded tensor of shape :math:`(B \cdot F, C, H, W)`.
-
-        Returns
-        -------
-        torch.Tensor
-            Padded tensor of shape :math:`(B \cdot F, C, H + 2p, W + 2p)`.
-        """
+        r"""Pad each face consistently with its neighbors on the HEALPix grid."""
         if not torch.compiler.is_compiling():
             if data.ndim != 4:
                 _raise_shape_error("HEALPixPadding.forward", data, "a 4D tensor")
@@ -525,9 +501,9 @@ class HEALPixLayer(torch.nn.Module):
     Examples
     --------
     >>> conv = HEALPixLayer(torch.nn.Conv2d, in_channels=3, out_channels=8, kernel_size=3)
-    >>> x = torch.randn(2, 12, 3, 16, 16)
+    >>> x = torch.randn(24, 3, 16, 16)
     >>> conv(x).shape
-    torch.Size([2, 12, 8, 16, 16])
+    torch.Size([24, 8, 16, 16])
     """
 
     def __init__(self, layer, **kwargs) -> None:
@@ -562,26 +538,15 @@ class HEALPixLayer(torch.nn.Module):
             self.layers = self.layers.to(memory_format=torch.channels_last)
 
     def forward(
-        self, x: Float[torch.Tensor, "... faces channels height width"]
-    ) -> Float[torch.Tensor, "... faces channels height width"]:
-        r"""
-        Apply the wrapped layer face-wise to a HEALPix tensor.
-
-        Parameters
-        ----------
-        x : torch.Tensor
-            Input tensor of shape :math:`(..., F=12, H, W)`.
-
-        Returns
-        -------
-        torch.Tensor
-            Output tensor with the same leading dimensions.
-        """
-        if not torch.compiler.is_compiling() and x.ndim < 4:
-            _raise_shape_error(
-                "HEALPixLayer.forward", x, "tensor with at least 4 dimensions"
-            )
+        self, x: Float[torch.Tensor, "batch_faces channels height width"]
+    ) -> Float[torch.Tensor, "batch_faces channels height width"]:
+        r"""Forward pass for the HEALPix layer wrapper."""
         return self.layers(x)
+
+
+# TODO: the below are not actually geometry-aware; update or remove
+# Since the `HEALPixLayer` only applies padding if the wrapped layer is a convolution,
+# these do not actually apply healpix padding before pooling
 
 
 class HEALPixMaxPool(torch.nn.Module):
@@ -602,7 +567,7 @@ class HEALPixMaxPool(torch.nn.Module):
     Forward
     -------
     x : torch.Tensor
-        Input tensor of shape :math:`(..., F=12, C, H, W)`.
+        Input tensor of shape :math:`(B \cdot F, C, H, W)`.
 
     Outputs
     -------
@@ -626,8 +591,8 @@ class HEALPixMaxPool(torch.nn.Module):
         )
 
     def forward(
-        self, x: Float[torch.Tensor, "... faces channels height width"]
-    ) -> Float[torch.Tensor, "... faces channels pooled_height pooled_width"]:
+        self, x: Float[torch.Tensor, "batch_faces channels height width"]
+    ) -> Float[torch.Tensor, "batch_faces channels pooled_height pooled_width"]:
         return self.maxpool(x)
 
 
@@ -649,7 +614,7 @@ class HEALPixAvgPool(torch.nn.Module):
     Forward
     -------
     x : torch.Tensor
-        Input tensor of shape :math:`(..., F=12, C, H, W)`.
+        Input tensor of shape :math:`(B \cdot F, C, H, W)`.
 
     Outputs
     -------
@@ -673,6 +638,6 @@ class HEALPixAvgPool(torch.nn.Module):
         )
 
     def forward(
-        self, x: Float[torch.Tensor, "... faces channels height width"]
-    ) -> Float[torch.Tensor, "... faces channels pooled_height pooled_width"]:
+        self, x: Float[torch.Tensor, "batch_faces channels height width"]
+    ) -> Float[torch.Tensor, "batch_faces channels pooled_height pooled_width"]:
         return self.avgpool(x)
