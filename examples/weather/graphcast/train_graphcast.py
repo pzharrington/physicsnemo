@@ -33,10 +33,7 @@ torch._dynamo.config.suppress_errors = True  # TODO check if this can be removed
 import os
 
 from physicsnemo.models.graphcast.graph_cast_net import GraphCastNet
-from physicsnemo.models.graphcast.utils.loss import (
-    CellAreaWeightedLossFunction,
-    GraphCastLossFunction,
-)
+from loss import CellAreaWeightedLossFunction, GraphCastLossFunction
 from physicsnemo.utils.logging import (
     PythonLogger,
     RankZeroLoggingWrapper,
@@ -50,7 +47,7 @@ from train_base import BaseTrainer
 from validation_base import Validation
 from physicsnemo.datapipes.climate import ERA5HDF5Datapipe, SyntheticWeatherDataLoader
 from physicsnemo.distributed import DistributedManager
-from physicsnemo.models.graphcast.utils.data_utils import StaticData
+from data_utils import StaticData
 
 import hydra
 from hydra.utils import to_absolute_path
@@ -228,19 +225,13 @@ class GraphCastTrainer(BaseTrainer):
                 cfg.dataset_metadata_path,
                 cfg.time_diff_std_path,
             )
-        try:
-            self.optimizer = apex.optimizers.FusedAdam(
-                self.model.parameters(),
-                lr=cfg.lr,
-                betas=(0.9, 0.95),
-                adam_w_mode=True,
-                weight_decay=0.1,
-            )
-            rank_zero_logger.info("Using FusedAdam optimizer")
-        except:
-            self.optimizer = torch.optim.AdamW(
-                self.model.parameters(), lr=cfg.lr, betas=(0.9, 0.95), weight_decay=0.1
-            )
+        self.optimizer = torch.optim.AdamW(
+            self.model.parameters(),
+            lr=cfg.lr,
+            betas=(0.9, 0.95),
+            weight_decay=0.1,
+            fused=True,
+        )
         scheduler1 = LinearLR(
             self.optimizer,
             start_factor=1e-3,
@@ -307,13 +298,6 @@ class GraphCastTrainer(BaseTrainer):
 
 @hydra.main(version_base="1.3", config_path="conf", config_name="config")
 def main(cfg: DictConfig) -> None:
-    # Optionally import apex
-    if cfg.use_apex:
-        try:
-            import apex
-        except:
-            raise ImportError("Apex is not installed.")
-
     if cfg.cugraphops_encoder or cfg.cugraphops_processor or cfg.cugraphops_decoder:
         try:
             import pylibcugraphops
