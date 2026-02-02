@@ -22,11 +22,11 @@ from physicsnemo.metrics.climate.graphcast_loss import (
 )
 
 
-def test_loss():
+def test_loss(device):
     """Tests if the custom loss function is equivalent to the default loss function."""
-    pred1 = torch.rand(1, 2, 721, 1440, device="cuda")
-    target1 = torch.rand(1, 2, 721, 1440, device="cuda")
-    area = torch.rand(721, 1440, device="cuda")
+    pred1 = torch.rand(1, 2, 721, 1440, device=device)
+    target1 = torch.rand(1, 2, 721, 1440, device=device)
+    area = torch.rand(721, 1440, device=device)
 
     default_loss = CellAreaWeightedLossFunction(area)
     custom_loss = CustomCellAreaWeightedLossFunction(area)
