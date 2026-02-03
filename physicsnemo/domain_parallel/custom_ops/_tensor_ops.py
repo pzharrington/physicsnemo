@@ -28,9 +28,16 @@ from torch.distributed.tensor._op_schema import (
     OutputSharding,
     RuntimeSchemaInfo,
 )
-from torch.distributed.tensor._ops.utils import (
-    register_prop_rule,
-)
+
+try:
+    from torch.distributed.tensor._ops.utils import (
+        register_prop_rule,
+    )
+except ImportError:
+    # PyTorch 2.10.0 temporarily moved this
+    from torch.distributed.tensor._ops.registration import (
+        register_prop_rule,
+    )
 from torch.distributed.tensor.placement_types import (
     Partial,
     Replicate,
