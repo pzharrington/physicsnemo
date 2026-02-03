@@ -42,8 +42,7 @@ class ConcatConditionWrapper(Module):
     preconditioners.
 
     Default behavior for unknown backbones is to concatenate ``cond_concat`` (if
-    provided) and pass ``cond_vec`` as the ``condition`` keyword argument, while
-    emitting a warning that the backbone type is not explicitly handled.
+    provided) and pass ``cond_vec`` as the ``condition`` keyword argument.
 
     Parameters
     ----------
@@ -125,26 +124,26 @@ class ConcatConditionWrapper(Module):
         **model_kwargs: Any,
     ) -> Float[torch.Tensor, " B *dims"]:
         r"""
-            Forward pass for the conditioned wrapper.
+        Forward pass for the conditioned wrapper.
 
-            Parameters
-            ----------
-            x : torch.Tensor
-                Noisy latent state of shape :math:`(B, *)` where :math:`B` is the
-                batch size.
-            t : torch.Tensor
-                Diffusion time tensor of shape :math:`(B,)`.
+        Parameters
+        ----------
+        x : torch.Tensor
+            Noisy latent state of shape :math:`(B, *)` where :math:`B` is the
+            batch size.
+        t : torch.Tensor
+            Diffusion time tensor of shape :math:`(B,)`.
         condition : torch.Tensor, TensorDict, or None, optional, default=None
             Conditioning data. Use a ``TensorDict`` to supply ``cond_concat`` and
             ``cond_vec`` tensors. A plain tensor is treated as the concatenated
             conditioning input (equivalent to ``cond_concat``).
-            **model_kwargs : Any
-                Additional keyword arguments forwarded to the backbone.
+        **model_kwargs : Any
+            Additional keyword arguments forwarded to the backbone.
 
-            Returns
-            -------
-            torch.Tensor
-                Model output with the same shape as ``x``.
+        Returns
+        -------
+        torch.Tensor
+            Model output with the same shape as ``x``.
         """
         cond_concat: torch.Tensor | None = None
         cond_vec: torch.Tensor | None = None
