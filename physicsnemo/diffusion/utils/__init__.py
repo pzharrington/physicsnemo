@@ -14,5 +14,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .utils import InfiniteSampler, StackedRandomGenerator
 from .model_wrappers import ConcatConditionWrapper
+from .utils import InfiniteSampler, StackedRandomGenerator
