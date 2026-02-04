@@ -1091,10 +1091,10 @@ class ZeroConditioningEmbedder(ConditioningEmbedderBase):
         return torch.empty(t.shape[0], 0, device=t.device, dtype=t.dtype)
 
 
-class PostMLPConditionEmbedder(ConditioningEmbedderBase):
-    r"""Conditioning embedder that adds condition to the timestep features after the MLP.
+class DiTConditionEmbedder(ConditioningEmbedderBase):
+    r"""DiT-style conditioning embedder.
 
-    Timestep and condition are processed independently and combined at the end.
+    Processes timestep and condition independently, then adds them together at the end.
 
     Parameters
     ----------
@@ -1173,30 +1173,24 @@ class PostMLPConditionEmbedder(ConditioningEmbedderBase):
         return c
 
 
-class PreMLPConditionEmbedder(ConditioningEmbedderBase):
-    r"""Conditioning embedder that adds labels BEFORE the MLP.
+class EDMConditionEmbedder(ConditioningEmbedderBase):
+    r"""EDM/SongUNet-style conditioning embedder.
 
-    Architecture: ``t → PositionalEmbedding → flip(sin/cos) → ADD → MLP → output``
-    where labels are added before MLP processing.
-
-    Timestep and labels are combined before the MLP.
-
-    Note: The final SiLU is omitted here; consumers (AdaLN blocks) apply SiLU
-    before their modulation linear layer.
+    Combines timestep and condition before the MLP.
 
     Parameters
     ----------
     emb_channels : int
         Output embedding dimension (typically 4 * hidden_size).
     noise_channels : int
-        Dimension of positional embedding (typically hidden_size).
+        Dimension of positional embedding for the noise/timestep label.
     label_dim : int, optional
         Class label dimension. If 0, no label embedding. Default 0.
     label_dropout : float, optional
         Dropout probability for labels during training. Default 0.0.
     legacy_label_bias : bool, optional
-        If ``True`` and ``label_dim`` is 0, add a legacy bias term matching the old
-        ``EmbedNoiseLabels`` behavior. Default ``False``.
+        If ``True`` and ``label_dim`` is 0, add a legacy bias term for backward compatibility.
+        Default ``False``.
     max_positions : int, optional
         Maximum positions for positional embedding. Default 10000.
 
@@ -1282,7 +1276,7 @@ class PreMLPConditionEmbedder(ConditioningEmbedderBase):
 
 def get_conditioning_embedder(
     hidden_size: int,
-    conditioning_embedder: Literal["post_mlp", "pre_mlp", "zero"] = "post_mlp",
+    conditioning_embedder: Literal["dit", "edm", "zero"] = "dit",
     condition_dim: int = 0,
     **embedder_kwargs: Any,
 ) -> ConditioningEmbedderBase:
@@ -1292,30 +1286,30 @@ def get_conditioning_embedder(
     ----------
     hidden_size : int
         The hidden size of the DiT model.
-    conditioning_embedder : Literal["post_mlp", "pre_mlp", "zero"]
+    conditioning_embedder : Literal["dit", "edm", "zero"]
         The type of conditioning embedder to use.
         Options:
-            - 'post_mlp': Maps the timestep and condition independently, then adds them together post-MLP.
-            - 'pre_mlp': Adds the timestep and condition together before the MLP.
+            - 'dit': DiT-style, maps timestep and condition independently (late fusion).
+            - 'edm': EDM/SongUNet-style, combines timestep and condition before MLP (early fusion).
             - 'zero': Returns empty (B, 0) tensors for bias-only AdaLN (unconditional/ViT-style inference).
     condition_dim : int
-        Condition dimension. For 'post_mlp', this is input condition dim.
-        For 'pre_mlp', this is output emb_channels.
+        Condition dimension. For 'dit', this is input condition dim.
+        For 'edm', this is output emb_channels.
     **embedder_kwargs
         Additional keyword arguments for the embedder.
     """
     if conditioning_embedder == "zero":
         return ZeroConditioningEmbedder()
-    if conditioning_embedder == "post_mlp":
-        return PostMLPConditionEmbedder(
+    if conditioning_embedder == "dit":
+        return DiTConditionEmbedder(
             hidden_size=hidden_size,
             condition_dim=condition_dim,
             **embedder_kwargs,
         )
-    if conditioning_embedder == "pre_mlp":
-        return PreMLPConditionEmbedder(
+    if conditioning_embedder == "edm":
+        return EDMConditionEmbedder(
             emb_channels=condition_dim,
             noise_channels=embedder_kwargs.pop("noise_channels", hidden_size),
             **embedder_kwargs,
         )
-    raise ValueError("conditioning_embedder must be 'post_mlp', 'pre_mlp', or 'zero'.")
+    raise ValueError("conditioning_embedder must be 'dit', 'edm', or 'zero'.")

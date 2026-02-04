@@ -173,7 +173,7 @@ class DiT(Module):
         attention_backend: Literal["timm", "transformer_engine", "natten2d"] = "transformer_engine",
         layernorm_backend: Literal["apex", "torch"] = "torch",
         condition_dim: Optional[int] = None,
-        conditioning_embedder: Union[Literal["post_mlp", "pre_mlp"], Module] = "post_mlp",
+        conditioning_embedder: Union[Literal["dit", "edm"], Module] = "dit",
         dit_initialization: Optional[int] = True,
         conditioning_embedder_kwargs: Dict[str, Any] = {},
         tokenizer_kwargs: Dict[str, Any] = {},
