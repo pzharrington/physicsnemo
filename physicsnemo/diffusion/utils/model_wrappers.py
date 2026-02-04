@@ -30,19 +30,45 @@ from physicsnemo.models.diffusion_unets import (
 
 class ConcatConditionWrapper(Module):
     r"""
-    Wrapper that handles channel-concatenated conditioning outside diffusion
-    preconditioners.
+    Wrapper that handles channel-concatenated conditioning in addition to
+    optional vector conditioning.
 
     This wrapper adapts backbones with different conditioning signatures to the
     :class:`~physicsnemo.diffusion.DiffusionModel` interface by concatenating
     image-like conditions to ``x`` and routing vector conditions to the
     appropriate argument. It is intended for cases where image-like conditioning
     (i.e., conditioning with the same spatial dimensions as ``x``) should be
-    concatenated along the channel dimension, which should not be handled by
-    preconditioners.
+    concatenated along the channel dimension to the noised latent state.
 
-    Default behavior for unknown backbones is to concatenate ``cond_concat`` (if
-    provided) and pass ``cond_vec`` as the ``condition`` keyword argument.
+    Externally, wrapping with this wrapper will allow a backbone with an
+    incompatible conditioning signature to satisfy the :class:`~physicsnemo.diffusion.DiffusionModel`
+    interface. Currently, the wrapper supports the following backbones:
+
+     - :class:`~physicsnemo.models.diffusion_unets.SongUNet`,
+     - :class:`~physicsnemo.models.diffusion_unets.SongUNetPosEmbd`,
+     - :class:`~physicsnemo.models.diffusion_unets.SongUNetPosLtEmbd`,
+     - :class:`~physicsnemo.models.diffusion_unets.DhariwalUNet`,
+     - :class:`~physicsnemo.experimental.models.dit.DiT`.
+     - Any backbone with an forward signatude matching that of the `DiT` model:
+       ``model(x, t, condition=None, **model_kwargs)`` where ``condition`` is a
+       tensor of shape :math:`(B, d)` and ``**model_kwargs`` are additional
+       keyword arguments forwarded to the backbone.
+    
+    The wrapper supports conditioning passed as either a ``TensorDict`` or a
+    ``torch.Tensor``. If a ``TensorDict`` is passed, it must use the keys
+    ``cond_concat`` and ``cond_vec`` to identify the image and vector
+    conditioning tensors, respectively, or the user may specify the expected
+    keys using the ``image_cond_key`` and ``vector_cond_key`` arguments when
+    instantiating the wrapper.
+
+    If a ``torch.Tensor`` is passed, it is treated as the image conditioning
+    input to be concatenated (i.e., treated like the value of ``cond_concat``
+    when a ``TensorDict`` is passed).
+    
+    The wrapper will route arguments approporiately depending on the backbone
+    type. The default behavior for unknown backbones is to concatenate the value
+    of ``cond_concat`` (if provided) and pass the value of ``cond_vec`` as the
+    ``condition`` keyword argument.
 
     Parameters
     ----------
@@ -63,9 +89,11 @@ class ConcatConditionWrapper(Module):
     t : torch.Tensor
         Diffusion time tensor of shape :math:`(B,)`.
     condition : torch.Tensor, TensorDict, or None, optional, default=None
-        Conditioning data. Use a ``TensorDict`` to supply ``cond_concat`` and
-        ``cond_vec`` tensors. A plain tensor is treated as the image
-        conditioning input (equivalent to ``cond_concat``).
+        Conditioning data. Use a ``TensorDict`` to explicitly supply 
+        concatenated conditioning and vector conditioning as keys 
+        ``cond_concat`` and ``cond_vec`` (or the custom keys
+        specified by ``image_cond_key`` and ``vector_cond_key``).
+        Alternately, supply a plain ``Tensor`` input to be concatenated.
     **model_kwargs : Any
         Additional keyword arguments forwarded to the backbone.
 
@@ -82,7 +110,7 @@ class ConcatConditionWrapper(Module):
     >>> import torch
     >>> from tensordict import TensorDict
     >>> from physicsnemo.models.diffusion_unets import SongUNet
-    >>> net = SongUNet(in_channels=3, out_channels=3, label_dim=4, img_resolution=8)
+    >>> net = SongUNet(in_channels=4, out_channels=3, label_dim=4, img_resolution=8)
     >>> wrapper = ConcatConditionWrapper(net)
     >>> x = torch.randn(2, 3, 8, 8)
     >>> t = torch.rand(2)
@@ -100,9 +128,11 @@ class ConcatConditionWrapper(Module):
     Wrap :class:`~physicsnemo.experimental.models.dit.DiT` similarly:
 
     >>> from physicsnemo.experimental.models.dit import DiT
-    >>> dit = DiT(in_channels=3, out_channels=3, condition_dim=4, input_size=8, patch_size=4)
+    >>> dit = DiT(in_channels=4, out_channels=3, condition_dim=4, input_size=8, patch_size=4)
     >>> dit_wrapper = ConcatConditionWrapper(dit)
     >>> out = dit_wrapper(x, t, condition)
+    >>> out.shape
+    torch.Size([2, 3, 8, 8])
     """
 
     def __init__(
@@ -153,10 +183,13 @@ class ConcatConditionWrapper(Module):
                 cond_concat = condition[self.image_cond_key]
             if self.vector_cond_key in condition:
                 cond_vec = condition[self.vector_cond_key]
-            if cond_concat is None and cond_vec is None:
+            if cond_concat is None or cond_vec is None:
                 raise ValueError(
                     "Condition TensorDict must include at least one of "
-                    f"'{self.image_cond_key}' or '{self.vector_cond_key}'."
+                    f"'{self.image_cond_key}' and '{self.vector_cond_key}'."
+                    f" If you are only supplying image-like conditioning for"
+                    f" concatenation and don't need vector conditioning, "
+                    f"supply a plain torch.Tensor instead of a TensorDict."
                 )
         elif isinstance(condition, torch.Tensor):
             cond_concat = condition
@@ -170,11 +203,17 @@ class ConcatConditionWrapper(Module):
                     f"Expected t to have shape ({batch_size},) matching batch size of "
                     f"x, but got {t.shape}."
                 )
-            if cond_vec is not None and cond_vec.shape[0] != batch_size:
-                raise ValueError(
-                    f"Condition vector has batch size {cond_vec.shape[0]} "
-                    f"but expected {batch_size} to match x."
-                )
+            if cond_vec is not None:
+                if cond_vec.shape[0] != batch_size:
+                    raise ValueError(
+                        f"Condition vector has batch size {cond_vec.shape[0]} "
+                        f"but expected {batch_size} to match x."
+                    )
+                if cond_vec.ndim != 2:
+                    raise ValueError(
+                        f"Condition vector must have 2 dimensions (batch, vector dim), "
+                        f"got {cond_vec.ndim}."
+                    )
             if cond_concat is not None:
                 if cond_concat.shape[0] != batch_size:
                     raise ValueError(

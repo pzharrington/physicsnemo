@@ -15,4 +15,4 @@
 # limitations under the License.
 
 from .utils import InfiniteSampler, StackedRandomGenerator
-from .wrappers import ConcatConditionWrapper
+from .model_wrappers import ConcatConditionWrapper

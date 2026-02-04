@@ -324,9 +324,12 @@ class BaseAffinePreconditioner(Module, ABC):
 
     **Example: Using ConcatConditionWrapper with a preconditioner**
 
-    The :class:`~physicsnemo.diffusion.utils.ConcatConditionWrapper` lets you
-    perform channel-wise concatenation outside of the preconditioner while still
-    using the standard diffusion model interface:
+    The pattern in the previous example, where (spatially-varying) conditioning
+    is concatenated to the noised latent state (and possibly vector conditioning
+    is also passed as a separate argument) is common across several diffusion
+    use-cases.
+    Thus for convenience, we provide the wrapper class :class:`~physicsnemo.diffusion.utils.ConcatConditionWrapper`
+    to save you the trouble of writing your own wrapper for this common pattern:
 
     >>> from physicsnemo.diffusion.preconditioners import EDMPreconditioner
     >>> from physicsnemo.diffusion.utils import ConcatConditionWrapper
