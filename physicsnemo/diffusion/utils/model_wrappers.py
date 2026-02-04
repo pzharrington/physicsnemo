@@ -13,6 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import warnings
 from typing import Any
 
 import torch
@@ -53,7 +54,7 @@ class ConcatConditionWrapper(Module):
        ``model(x, t, condition=None, **model_kwargs)`` where ``condition`` is a
        tensor of shape :math:`(B, d)` and ``**model_kwargs`` are additional
        keyword arguments forwarded to the backbone.
-    
+
     The wrapper supports conditioning passed as either a ``TensorDict`` or a
     ``torch.Tensor``. If a ``TensorDict`` is passed, it must use the keys
     ``cond_concat`` and ``cond_vec`` to identify the image and vector
@@ -64,7 +65,7 @@ class ConcatConditionWrapper(Module):
     If a ``torch.Tensor`` is passed, it is treated as the image conditioning
     input to be concatenated (i.e., treated like the value of ``cond_concat``
     when a ``TensorDict`` is passed).
-    
+
     The wrapper will route arguments approporiately depending on the backbone
     type. The default behavior for unknown backbones is to concatenate the value
     of ``cond_concat`` (if provided) and pass the value of ``cond_vec`` as the
@@ -89,8 +90,8 @@ class ConcatConditionWrapper(Module):
     t : torch.Tensor
         Diffusion time tensor of shape :math:`(B,)`.
     condition : torch.Tensor, TensorDict, or None, optional, default=None
-        Conditioning data. Use a ``TensorDict`` to explicitly supply 
-        concatenated conditioning and vector conditioning as keys 
+        Conditioning data. Use a ``TensorDict`` to explicitly supply
+        concatenated conditioning and vector conditioning as keys
         ``cond_concat`` and ``cond_vec`` (or the custom keys
         specified by ``image_cond_key`` and ``vector_cond_key``).
         Alternately, supply a plain ``Tensor`` input to be concatenated.
@@ -192,6 +193,16 @@ class ConcatConditionWrapper(Module):
                     f"supply a plain torch.Tensor instead of a TensorDict."
                 )
         elif isinstance(condition, torch.Tensor):
+            if (
+                self.image_cond_key != "cond_concat"
+                or self.vector_cond_key != "cond_vec"
+            ):
+                warnings.warn(
+                    f"ConcatConditionWrapper was instantiated with custom image and vector "
+                    f"conditioning keys '{self.image_cond_key}' and '{self.vector_cond_key}' "
+                    f"but a plain torch.Tensor was passed as condition. The tensor will be "
+                    f"treated as the image conditioning input to be concatenated."
+                )
             cond_concat = condition
         elif condition is not None:
             raise TypeError("Condition must be a torch.Tensor, TensorDict, or None.")
