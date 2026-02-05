@@ -102,7 +102,10 @@ class CalendarEmbedding(Module):
         second_of_day: torch.Tensor,
     ) -> torch.Tensor:
         if second_of_day.shape != day_of_year.shape:
-            raise ValueError()
+            raise ValueError(
+                f"second_of_day shape {second_of_day.shape} must match "
+                f"day_of_year shape {day_of_year.shape}"
+            )
 
         if self.include_legacy_bug:
             local_time = (second_of_day.unsqueeze(2) - self.lon * 86400 // 360) % 86400
