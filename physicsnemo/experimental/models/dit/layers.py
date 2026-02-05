@@ -505,7 +505,7 @@ class DiTBlock(nn.Module):
         self,
         hidden_size: int,
         num_heads: int,
-        attention_backend: Union[Literal["transformer_engine", "timm", "natten2d"], Module] = "transformer_engine",
+        attention_backend: Union[Literal["transformer_engine", "timm", "natten2d"], Module] = "timm",
         layernorm_backend: Literal["apex", "torch"] = "torch",
         mlp_ratio: float = 4.0,
         intermediate_dropout: bool = False,

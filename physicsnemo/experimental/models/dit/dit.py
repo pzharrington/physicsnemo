@@ -161,7 +161,7 @@ class DiT(Module):
         depth: int = 12,
         num_heads: int = 8,
         mlp_ratio: float = 4.0,
-        attention_backend: Literal["timm", "transformer_engine", "natten2d"] = "transformer_engine",
+        attention_backend: Literal["timm", "transformer_engine", "natten2d"] = "timm",
         layernorm_backend: Literal["apex", "torch"] = "torch",
         condition_dim: Optional[int] = None,
         dit_initialization: Optional[int] = True,
