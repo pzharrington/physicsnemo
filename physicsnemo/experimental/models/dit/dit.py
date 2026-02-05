@@ -87,7 +87,7 @@ class DiT(Module):
     mlp_ratio (float, optional):
         The ratio of the MLP hidden dimension to the embedding dimension. Defaults to 4.0.
     attention_backend (Literal["timm", "transformer_engine", "natten2d"], optional):
-        The attention backend to use. Defaults to 'transformer_engine'. You may provide:
+        The attention backend to use. Defaults to 'timm'. You may provide:
         - A string in {"timm", "transformer_engine", "natten2d"} to select a built-in backend.
           See :class:`physicsnemo.experimental.models.dit.layers.DiTBlock` for a description of each built-in backend.
     layernorm_backend (Literal["apex", "torch"], optional):
