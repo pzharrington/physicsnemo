@@ -13,71 +13,82 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import pytest
 import torch
+
+from physicsnemo.core.version_check import check_version_spec
+
+if not check_version_spec("earth2grid", "0.1.0", hard_fail=False):
+    pytest.skip(
+        "Skipping test because earth2grid is not installed",
+        allow_module_level=True,
+    )
 
 from physicsnemo.experimental.models.healda import (
     HPXPatchDetokenizer,
     HPXPatchTokenizer,
 )
+from test import common
 
 
-def test_hpx_patch_tokenizer():
+def test_hpx_patch_tokenizer_forward(device):
     """Test HPXPatchTokenizer forward pass."""
+    torch.manual_seed(0)
+
     in_channels = 5
     hidden_size = 64
-    level_fine = 6
-    level_coarse = 4
+    level_fine = 5
+    level_coarse = 3
 
-    tokenizer = HPXPatchTokenizer(
+    model = HPXPatchTokenizer(
         in_channels=in_channels,
         hidden_size=hidden_size,
         level_fine=level_fine,
         level_coarse=level_coarse,
-    )
+    ).to(device)
+    model.eval()
 
     b, t = 2, 1
     npix = 12 * 4**level_fine
-    x = torch.randn(b, in_channels, t, npix)
+    x = torch.randn(b, in_channels, t, npix, device=device)
+    second_of_day = torch.tensor([[43200], [21600]], device=device)
+    day_of_year = torch.tensor([[100], [200]], device=device)
 
-    second_of_day = torch.randint(0, 86400, (b, t))
-    day_of_year = torch.randint(0, 365, (b, t))
-
-    out = tokenizer(x, second_of_day=second_of_day, day_of_year=day_of_year)
-
-    # Output should be (B, L, D) where L = T * npix_coarse
-    expected_npix_coarse = 12 * 4**level_coarse
-    expected_L = t * expected_npix_coarse
-    assert out.shape == (b, expected_L, hidden_size)
-
-    # Verify output is finite
-    assert torch.isfinite(out).all(), "Output contains non-finite values"
+    assert common.validate_forward_accuracy(
+        model,
+        (x, second_of_day, day_of_year),
+        file_name="models/healda/data/hpx_tokenizer_output.pth",
+        atol=1e-4,
+    )
 
 
-def test_hpx_patch_detokenizer():
+def test_hpx_patch_detokenizer_forward(device):
     """Test HPXPatchDetokenizer forward pass."""
+    torch.manual_seed(0)
+
     hidden_size = 64
     out_channels = 5
-    level_coarse = 4
-    level_fine = 6
-    time_length = 3
+    level_coarse = 3
+    level_fine = 5
+    time_length = 2
 
-    detokenizer = HPXPatchDetokenizer(
+    model = HPXPatchDetokenizer(
         hidden_size=hidden_size,
         out_channels=out_channels,
         level_coarse=level_coarse,
         level_fine=level_fine,
         time_length=time_length,
-    )
+    ).to(device)
+    model.eval()
 
     b = 2
-    npix_coarse = 12 * 4**level_coarse
-    L = time_length * npix_coarse
-    x = torch.randn(b, L, hidden_size)
-    c = torch.randn(b, hidden_size)  # Conditioning
+    L = time_length * 12 * 4**level_coarse
+    x = torch.randn(b, L, hidden_size, device=device)
+    c = torch.randn(b, hidden_size, device=device)
 
-    out = detokenizer(x, c)
-
-    # Output should be (B, C, T, npix_fine)
-    npix_fine = 12 * 4**level_fine
-    assert out.shape == (b, out_channels, time_length, npix_fine)
-    assert torch.isfinite(out).all()
+    assert common.validate_forward_accuracy(
+        model,
+        (x, c),
+        file_name="models/healda/data/hpx_detokenizer_output.pth",
+        atol=1e-4,
+    )

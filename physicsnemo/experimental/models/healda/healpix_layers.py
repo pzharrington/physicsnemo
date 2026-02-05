@@ -15,20 +15,40 @@
 # limitations under the License.
 """HEALPix tokenization and detokenization layers for HealDA."""
 
+import importlib
 from typing import Optional
 
-import earth2grid
-import earth2grid.healpix
 import einops
 import torch
 import torch.nn as nn
 
+from physicsnemo.core.version_check import check_version_spec
 from physicsnemo.experimental.models.dit.layers import (
     DetokenizerModuleBase,
     TokenizerModuleBase,
 )
 
 from .embedding import CalendarEmbedding
+
+EARTH2GRID_AVAILABLE = check_version_spec("earth2grid", "0.1.0", hard_fail=False)
+
+
+if EARTH2GRID_AVAILABLE:
+    _earth2grid_healpix = importlib.import_module("earth2grid.healpix")
+    HEALPIX_PAD_XY = _earth2grid_healpix.HEALPIX_PAD_XY
+    _Grid = _earth2grid_healpix.Grid
+else:
+    # Dummy symbols for missing earth2grid backend
+    HEALPIX_PAD_XY = None
+
+    class _Grid:
+        """Dummy Grid class for missing earth2grid."""
+
+        def __init__(self, *args, **kwargs):
+            raise ImportError(
+            "physicsnemo.experimental.models.healda: earth2grid is required "
+            "for HEALPix tokenization. Install earth2grid from https://github.com/NVlabs/earth2grid"
+            )
 
 
 class HPXPatchTokenizer(TokenizerModuleBase):
@@ -67,7 +87,7 @@ class HPXPatchTokenizer(TokenizerModuleBase):
         :math:`D=\\mathrm{hidden\\_size}`.
     """
 
-    pixel_order = earth2grid.healpix.HEALPIX_PAD_XY
+    pixel_order = HEALPIX_PAD_XY
 
     def __init__(
         self,
@@ -96,7 +116,7 @@ class HPXPatchTokenizer(TokenizerModuleBase):
         self.pos_embed = nn.Parameter(torch.randn(npix_coarse, hidden_size))
 
         # Calendar embedding
-        grid = earth2grid.healpix.Grid(level=level_coarse, pixel_order=self.pixel_order)
+        grid = _Grid(level=level_coarse, pixel_order=self.pixel_order)
         lon = torch.as_tensor(grid.lon)
         if hidden_size % 4 != 0:
             raise ValueError(f"hidden_size must be divisible by 4, got {hidden_size}")
