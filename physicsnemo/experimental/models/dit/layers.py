@@ -1073,10 +1073,14 @@ class ConditioningEmbedderBase(Module, ABC):
 
 
 class ZeroConditioningEmbedder(ConditioningEmbedderBase):
-    """Zero conditioning embedder for unconditional/VIT mode (condition_dim=0).
+    r"""Zero conditioning embedder for unconditional/deterministic models (condition_dim=0).
 
     Returns empty tensors of shape (B, 0) for conditioning, allowing
     AdaLN blocks to operate in bias-only mode (0 x D weight + D bias).
+
+   This is useful when a deterministic model which uses constant timestep/condition values
+   is trained using the DiT-style adaptive layer norm mechanism. In this case, the MLP weight matrix
+   can be folded into a fixed bias parameter to reduce parameters at inference.
     """
 
     def __init__(self):

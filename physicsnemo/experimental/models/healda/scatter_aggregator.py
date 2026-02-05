@@ -110,6 +110,24 @@ class ScatterAggregator(Module):
         Number of platforms.
     npix : int
         Number of spatial pixels in the target grid.
+
+    Forward
+    -------
+    obs_features : torch.Tensor
+        Observation features, shape :math:`(N_{obs}, C_{in})`.
+    batch_idx : torch.Tensor
+        Batch index per observation, shape :math:`(N_{obs},)`.
+    pix : torch.Tensor
+        HEALPix pixel index per observation (NEST ordering), shape :math:`(N_{obs},)`.
+    bucket_id : torch.Tensor
+        Bucket index per observation, shape :math:`(N_{obs},)`.
+    nbatch : int
+        Number of samples in the batch.
+
+    Outputs
+    -------
+    torch.Tensor
+        Per-pixel aggregated features, shape :math:`(B, N_{pix}, C_{out})` in NEST ordering.
     """
 
     def __init__(
