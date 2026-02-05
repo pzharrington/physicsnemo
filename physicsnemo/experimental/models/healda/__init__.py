@@ -16,7 +16,6 @@
 
 from .embedding import (
     CalendarEmbedding,
-    EmbedNoiseLabels,
     FrequencyEmbedding,
 )
 
