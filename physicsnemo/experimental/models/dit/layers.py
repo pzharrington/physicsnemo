@@ -217,7 +217,7 @@ class TimmSelfAttention(AttentionModuleBase):
             kwargs["norm_layer"] = partial(RmsNorm, affine=qk_norm_affine)
         elif qk_norm_type == "LayerNorm":
             kwargs["qk_norm"] = True
-            kwargs["norm_layer"] = nn.LayerNorm
+            kwargs["norm_layer"] = partial(nn.LayerNorm, elementwise_affine=qk_norm_affine)
         
         self.attn_op = Attention(dim=hidden_size, num_heads=num_heads, attn_drop=attn_drop_rate, proj_drop=proj_drop_rate, qkv_bias=True, **kwargs)
 
