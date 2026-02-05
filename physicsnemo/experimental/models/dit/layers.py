@@ -824,7 +824,8 @@ class PatchEmbed2DTokenizer(TokenizerModuleBase):
             nn.init.constant_(self.x_embedder.proj.bias, 0)
         
         # Initialize the learnable positional embedding with a normal distribution.
-        nn.init.normal_(self.pos_embed, std=0.02)
+        if isinstance(self.pos_embed, nn.Parameter):
+            nn.init.normal_(self.pos_embed, std=0.02)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # (B, D, Hp, Wp)
