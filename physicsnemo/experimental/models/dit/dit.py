@@ -20,16 +20,17 @@ import torch.nn as nn
 from dataclasses import dataclass
 from physicsnemo.core.meta import ModelMetaData
 from physicsnemo.core.module import Module
-from physicsnemo.experimental.models.dit import DiTBlock
 from physicsnemo.experimental.models.dit.layers import (
+    DiTBlock,
     get_tokenizer,
     get_detokenizer,
-    get_conditioning_embedder,
     TokenizerModuleBase,
     DetokenizerModuleBase,
-    ConditioningEmbedderBase,
 )
-
+from physicsnemo.experimental.models.dit.conditioning_embedders import (
+    ConditioningEmbedder,
+    get_conditioning_embedder,
+)
 
 @dataclass
 class MetaData(ModelMetaData):
@@ -240,8 +241,8 @@ class DiT(Module):
                 **conditioning_embedder_kwargs,
             )
         else:
-            if not isinstance(conditioning_embedder, ConditioningEmbedderBase):
-                raise TypeError("conditioning_embedder must be a string or a physicsnemo.core.Module instance subclassing physicsnemo.experimental.models.dit.layers.ConditioningEmbedderBase")
+            if not isinstance(conditioning_embedder, ConditioningEmbedder):
+                raise TypeError("conditioning_embedder must be a string or a Module implementing the ConditioningEmbedder protocol")
             self.conditioning_embedder = conditioning_embedder
 
         # Detokenizer module: accept string or pre-instantiated PhysicsNeMo Module

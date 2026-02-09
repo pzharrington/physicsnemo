@@ -16,7 +16,7 @@
 import pytest
 import torch
 
-from physicsnemo.experimental.models.dit.layers import (
+from physicsnemo.experimental.models.dit import (
     DiTConditionEmbedder,
     EDMConditionEmbedder,
     ZeroConditioningEmbedder,
