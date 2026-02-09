@@ -29,6 +29,7 @@ from physicsnemo.experimental.models.dit.layers import (
 )
 from physicsnemo.experimental.models.dit.conditioning_embedders import (
     ConditioningEmbedder,
+    ConditioningEmbedderType,
     get_conditioning_embedder,
 )
 
@@ -177,7 +178,7 @@ class DiT(Module):
         attention_backend: Literal["timm", "transformer_engine", "natten2d"] = "timm",
         layernorm_backend: Literal["apex", "torch"] = "torch",
         condition_dim: Optional[int] = None,
-        conditioning_embedder: Union[Literal["dit", "edm"], Module] = "dit",
+        conditioning_embedder: ConditioningEmbedderType | ConditioningEmbedder = ConditioningEmbedderType.DIT,
         dit_initialization: Optional[int] = True,
         conditioning_embedder_kwargs: Dict[str, Any] = {},
         tokenizer_kwargs: Dict[str, Any] = {},
@@ -234,18 +235,18 @@ class DiT(Module):
                 raise TypeError("tokenizer must be a string or a physicsnemo.core.Module instance subclassing physicsnemo.experimental.models.dit.layers.TokenizerModuleBase")
             self.tokenizer = tokenizer
 
-        # Conditioning embedder: accept string or pre-instantiated Module
-        if isinstance(conditioning_embedder, str):
+        # Conditioning embedder: accept enum or pre-instantiated Module
+        if isinstance(conditioning_embedder, ConditioningEmbedderType):
             self.conditioning_embedder = get_conditioning_embedder(
+                conditioning_embedder,
                 hidden_size=hidden_size,
-                conditioning_embedder=conditioning_embedder,
                 condition_dim=condition_dim or 0,
                 amp_mode=self.meta.amp_gpu,
                 **conditioning_embedder_kwargs,
             )
         else:
             if not isinstance(conditioning_embedder, ConditioningEmbedder):
-                raise TypeError("conditioning_embedder must be a string or a Module implementing the ConditioningEmbedder protocol")
+                raise TypeError("conditioning_embedder must be a ConditioningEmbedderType or a Module implementing the ConditioningEmbedder protocol")
             self.conditioning_embedder = conditioning_embedder
 
         # Detokenizer module: accept string or pre-instantiated PhysicsNeMo Module

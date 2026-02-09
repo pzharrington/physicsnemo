@@ -29,6 +29,7 @@ from .layers import (
 )
 from .conditioning_embedders import (
     ConditioningEmbedder,
+    ConditioningEmbedderType,
     DiTConditionEmbedder,
     EDMConditionEmbedder,
     ZeroConditioningEmbedder,

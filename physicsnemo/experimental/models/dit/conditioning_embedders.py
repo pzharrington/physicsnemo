@@ -17,7 +17,8 @@
 """Conditioning embedders for DiT models."""
 
 import math
-from typing import Any, Literal, Protocol, runtime_checkable
+from enum import Enum
+from typing import Any, Protocol, runtime_checkable
 
 import torch
 import torch.nn as nn
@@ -88,17 +89,14 @@ class DiTConditionEmbedder(Module):
     Parameters
     ----------
     hidden_size : int
-        Output embedding dimension.
+        Output embedding dimension, matching DiT hidden_size.
     condition_dim : int, optional
         Input condition dimension. If 0, no condition embedding is used.
-    max_positions : int, optional
-        Maximum positions for positional embedding. Default 10000.
-    learnable : bool, optional
-        Whether to use learnable MLP after positional embedding. Default True.
-    mlp_hidden_dim : int, optional
-        Hidden dimension of learnable MLP. Defaults to 2 * hidden_size.
     amp_mode : bool, optional
         Whether mixed-precision (AMP) training is enabled. Default False.
+    **timestep_embed_kwargs
+        Keyword arguments passed to :class:`physicsnemo.nn.PositionalEmbedding`
+        for the timestep embedding.
 
     Forward
     -------
@@ -117,20 +115,17 @@ class DiTConditionEmbedder(Module):
         self,
         hidden_size: int,
         condition_dim: int = 0,
-        max_positions: int = 10000,
-        learnable: bool = True,
-        mlp_hidden_dim: int | None = None,
         amp_mode: bool = False,
+        **timestep_embed_kwargs: Any,
     ):
         super().__init__()
         self._output_dim = hidden_size
 
         self.t_embedder = PositionalEmbedding(
             num_channels=hidden_size,
-            max_positions=max_positions,
-            learnable=learnable,
-            mlp_hidden_dim=mlp_hidden_dim,
             amp_mode=amp_mode,
+            learnable=True,
+            **timestep_embed_kwargs,
         )
 
         self.cond_embedder = (
@@ -173,12 +168,12 @@ class EDMConditionEmbedder(Module):
         Output embedding dimension (typically 4 * hidden_size).
     noise_channels : int
         Dimension of positional embedding for the noise/timestep label.
-    label_dim : int, optional
-        Class label dimension. If 0, no label embedding. Default 0.
-    label_dropout : float, optional
-        Dropout probability for labels during training. Default 0.0.
-    legacy_label_bias : bool, optional
-        If ``True`` and ``label_dim`` is 0, add a legacy bias term for backward compatibility.
+    condition_dim : int, optional
+        Input condition dimension. If 0, no condition embedding. Default 0.
+    condition_dropout : float, optional
+        Dropout probability for conditions during training. Default 0.0.
+    legacy_condition_bias : bool, optional
+        If ``True``, includes a bias term even when ``condition_dim`` is 0.
         Default ``False``.
     max_positions : int, optional
         Maximum positions for positional embedding. Default 10000.
@@ -188,7 +183,7 @@ class EDMConditionEmbedder(Module):
     t : torch.Tensor
         Timestep/noise_labels tensor of shape :math:`(B,)`.
     condition : torch.Tensor, optional
-        Condition/class labels of shape :math:`(B, label_dim)`.
+        Condition tensor of shape :math:`(B, condition_dim)`.
 
     Returns
     -------
@@ -200,32 +195,29 @@ class EDMConditionEmbedder(Module):
         self,
         emb_channels: int,
         noise_channels: int,
-        label_dim: int = 0,
-        label_dropout: float = 0.0,
-        legacy_label_bias: bool = False,
+        condition_dim: int = 0,
+        condition_dropout: float = 0.0,
+        legacy_condition_bias: bool = False,
         max_positions: int = 10000,
-        **kwargs,  # Accept and ignore extra kwargs (e.g., amp_mode) for compatibility
+        **kwargs, # ignore extra kwargs
     ):
         super().__init__()
         self._output_dim = emb_channels
-        self.label_dropout = label_dropout
-        self.legacy_label_bias = legacy_label_bias
+        self.condition_dropout = condition_dropout
+        self.legacy_condition_bias = legacy_condition_bias
 
         self.map_noise = PositionalEmbedding(
             num_channels=noise_channels,
             max_positions=max_positions,
             endpoint=True,
             learnable=False,  # No MLP here - added below
+            embed_fn="np_sin_cos",
         )
 
-        # Label embedding (added before MLP)
-        if label_dim > 0:
-            self.map_label = nn.Linear(label_dim, noise_channels)
-        elif legacy_label_bias:
-            # Preserve legacy bias-only behavior for label_dim=0.
-            self.map_label = nn.Linear(0, noise_channels, bias=True)
-        else:
-            self.map_label = None
+        # Condition embedding (added before MLP)
+        self.map_condition = None
+        if condition_dim > 0 or legacy_condition_bias:
+            self.map_condition = nn.Linear(condition_dim, noise_channels)
 
         # MLP: Linear → SiLU → Linear (no final SiLU - moved to AdaLN)
         self.map_layer0 = nn.Linear(noise_channels, emb_channels)
@@ -238,67 +230,52 @@ class EDMConditionEmbedder(Module):
     def forward(
         self, t: torch.Tensor, condition: torch.Tensor | None = None, **kwargs
     ) -> torch.Tensor:
-        # Positional embedding
         emb = self.map_noise(t)
 
-        # Swap sin/cos order
-        emb = emb.reshape(emb.shape[0], 2, -1).flip(1).reshape(*emb.shape)
+        # Add condition embedding before final MLP
+        if self.map_condition is not None and condition is not None:
+            tmp = condition
+            if self.training and self.condition_dropout:
+                tmp = tmp * (
+                    torch.rand([t.shape[0], 1], device=tmp.device)
+                    >= self.condition_dropout
+                ).to(tmp.dtype)
+            emb = emb + self.map_condition(tmp * math.sqrt(self.map_condition.in_features))
 
-        # Add label embedding before MLP
-        if self.map_label is not None:
-            if condition is None and self.legacy_label_bias and self.map_label.in_features == 0:
-                emb = emb + self.map_label.bias
-            elif condition is not None:
-                tmp = condition
-                if self.training and self.label_dropout:
-                    tmp = tmp * (
-                        torch.rand([t.shape[0], 1], device=tmp.device) >= self.label_dropout
-                    ).to(tmp.dtype)
-                emb = emb + self.map_label(tmp * math.sqrt(self.map_label.in_features))
-
-        # MLP 
+        # MLP
         emb = torch.nn.functional.silu(self.map_layer0(emb))
         emb = self.map_layer1(emb)
 
         return emb
 
 
+class ConditioningEmbedderType(Enum):
+    """Conditioning embedder types for DiT models."""
+
+    DIT = DiTConditionEmbedder
+    EDM = EDMConditionEmbedder
+    ZERO = ZeroConditioningEmbedder
+
+
 def get_conditioning_embedder(
-    hidden_size: int,
-    conditioning_embedder: Literal["dit", "edm", "zero"] = "dit",
-    condition_dim: int = 0,
-    **embedder_kwargs: Any,
+    conditioning_embedder: ConditioningEmbedderType = ConditioningEmbedderType.DIT,
+    **kwargs: Any,
 ) -> ConditioningEmbedder:
     r"""Factory function to create conditioning embedders.
 
     Parameters
     ----------
-    hidden_size : int
-        The hidden size of the DiT model.
-    conditioning_embedder : Literal["dit", "edm", "zero"]
+    conditioning_embedder : ConditioningEmbedderType
         The type of conditioning embedder to use.
         Options:
-            - 'dit': DiT-style, maps timestep and condition independently (late fusion).
-            - 'edm': EDM/SongUNet-style, combines timestep and condition before MLP (early fusion).
-            - 'zero': Returns empty (B, 0) tensors for bias-only AdaLN (unconditional/ViT-style inference).
-    condition_dim : int
-        Condition dimension. For 'dit', this is input condition dim.
-        For 'edm', this is output emb_channels.
-    **embedder_kwargs
-        Additional keyword arguments for the embedder.
+            - DIT: DiT-style, maps timestep and condition independently (late fusion).
+            - EDM: EDM/SongUNet-style, combines timestep and condition before MLP (early fusion).
+            - ZERO: Returns empty (B, 0) tensors for bias-only AdaLN (unconditional/ViT-style inference).
+    **kwargs
+        Keyword arguments passed to the embedder constructor.
+        See :class:`DiTConditionEmbedder` or :class:`EDMConditionEmbedder` for available options.
     """
-    if conditioning_embedder == "zero":
-        return ZeroConditioningEmbedder()
-    if conditioning_embedder == "dit":
-        return DiTConditionEmbedder(
-            hidden_size=hidden_size,
-            condition_dim=condition_dim,
-            **embedder_kwargs,
-        )
-    if conditioning_embedder == "edm":
-        return EDMConditionEmbedder(
-            emb_channels=condition_dim,
-            noise_channels=embedder_kwargs.pop("noise_channels", hidden_size),
-            **embedder_kwargs,
-        )
-    raise ValueError("conditioning_embedder must be 'dit', 'edm', or 'zero'.")
+    if conditioning_embedder == ConditioningEmbedderType.ZERO:
+        return conditioning_embedder.value()
+    else:
+        return conditioning_embedder.value(**kwargs)
