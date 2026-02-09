@@ -525,6 +525,11 @@ class DiTBlock(nn.Module):
         The dropout rate for the projection operation. Default is 0.0.
     mlp_drop_rate (float):
         The dropout rate for the MLP operation. Default is 0.0.
+    drop_path (float):
+        DropPath (stochastic depth) rate. Default is 0.0.
+    condition_embed_dim (int, optional):
+        Input dimension of the adaptive layer norm (AdaLN) modulation. If None, defaults to hidden_size.
+        This should match the output dimension of the conditioning embedder.
     **attn_kwargs (Any):
         Additional keyword arguments for the attention module.
 
@@ -566,7 +571,7 @@ class DiTBlock(nn.Module):
         mlp_drop_rate: float = 0.0,
         final_mlp_dropout: bool = True,
         drop_path: float = 0.0,
-        condition_dim: Optional[int] = None,
+        condition_embed_dim: Optional[int] = None,
         **attn_kwargs: Any,
     ):
         super().__init__()
@@ -604,7 +609,7 @@ class DiTBlock(nn.Module):
             drop=mlp_drop_rate,
             final_dropout=final_mlp_dropout,
         )
-        modulation_input_dim = hidden_size if condition_dim is None else condition_dim
+        modulation_input_dim = hidden_size if condition_embed_dim is None else condition_embed_dim
         self.adaptive_modulation = nn.Sequential(
             nn.SiLU(), nn.Linear(modulation_input_dim, 6 * hidden_size, bias=True)
         )
@@ -623,7 +628,7 @@ class DiTBlock(nn.Module):
         self,
         x: torch.Tensor,
         c: torch.Tensor,
-        attn_kwargs: Optional[Dict[str, Any]] = None,
+        attn_kwargs: Dict[str, Any] = {},
         p_dropout: Optional[float | torch.Tensor] = None,
     ) -> torch.Tensor:
 
@@ -649,7 +654,7 @@ class DiTBlock(nn.Module):
         
         attention_output = self.attention(
             modulated_attn_input,
-            **(attn_kwargs or {}),
+            **attn_kwargs,
         )
         x = torch.addcmul(x, self.drop_path(attention_gate.unsqueeze(1)), attention_output)
 

@@ -130,7 +130,9 @@ class DiT(Module):
         The dropout probability for the intermediate dropout module (pre-attention) in the DiTBlock. If None, no dropout will be applied.
         If a scalar, the same dropout probability will be applied to all samples in the batch.
         Otherwise, it should be a tensor of shape (B,) to apply per-sample dropout to each sample in a batch.
-    tokenizer_kwargs (Optional[Dict[str, Any]]):
+    attn_kwargs (Dict[str, Any]):
+        Additional keyword arguments passed to the attention module's forward method.
+    tokenizer_kwargs (Dict[str, Any]):
         Additional keyword arguments passed to the tokenizer's forward method.
 
     Returns
@@ -288,7 +290,7 @@ class DiT(Module):
                     layernorm_backend=layernorm_backend,
                     mlp_ratio=mlp_ratio,
                     drop_path=drop_path_rates[i],
-                    condition_dim=self.conditioning_embedder.output_dim,
+                    condition_embed_dim=self.conditioning_embedder.output_dim,
                     **block_kwargs,
                     **attn_kwargs,
                 )
@@ -321,24 +323,24 @@ class DiT(Module):
         t: torch.Tensor,
         condition: Optional[torch.Tensor] = None,
         p_dropout: Optional[float | torch.Tensor] = None,
-        attn_kwargs: Optional[Dict[str, Any]] = None,
-        tokenizer_kwargs: Optional[Dict[str, Any]] = None,
+        attn_kwargs: Dict[str, Any] = {},
+        tokenizer_kwargs: Dict[str, Any] = {},
     ) -> torch.Tensor:
         # Tokenize: (B, C, H, W) -> (B, L, D)
         if self.force_tokenization_fp32:
             dtype = x.dtype
             x = x.to(torch.float32)
             with torch.autocast(device_type="cuda", enabled=False):
-                x = self.tokenizer(x, **(tokenizer_kwargs or {}))
+                x = self.tokenizer(x, **tokenizer_kwargs)
             x = x.to(dtype)
         else:
-            x = self.tokenizer(x, **(tokenizer_kwargs or {}))
+            x = self.tokenizer(x, **tokenizer_kwargs)
 
         # Compute conditioning embedding
         c = self.conditioning_embedder(t, condition=condition)  # (B, D)
         
         for block in self.blocks:
-            x = block(x, c, p_dropout=p_dropout, attn_kwargs={**self.attn_kwargs_forward, **(attn_kwargs or {})})  # (B, L, D)
+            x = block(x, c, p_dropout=p_dropout, attn_kwargs={**self.attn_kwargs_forward, **attn_kwargs})  # (B, L, D)
 
         # De-tokenize: (B, L, D) -> (B, C, H, W)
         if self.force_tokenization_fp32:

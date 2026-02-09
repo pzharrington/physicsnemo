@@ -49,7 +49,7 @@ class ConditioningEmbedder(Protocol):
 
     @property
     def output_dim(self) -> int:
-        """Output dimension of conditioning embedding (used for block condition_dim)."""
+        """Output dimension of conditioning embedding"""
         ...
 
     def forward(self, t: torch.Tensor, **kwargs) -> torch.Tensor:
