@@ -14,14 +14,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .embedding import (
-    CalendarEmbedding,
-    FrequencyEmbedding,
-)
-
-from .healpix_layers import (
-    HPXPatchDetokenizer,
-    HPXPatchTokenizer,
-)
-
 from .scatter_aggregator import ScatterAggregator, scatter_mean
