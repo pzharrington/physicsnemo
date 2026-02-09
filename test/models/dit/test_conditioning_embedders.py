@@ -24,17 +24,6 @@ from physicsnemo.experimental.models.dit import (
 from test import common
 
 
-@pytest.mark.parametrize("condition_dim", [0, 128])
-def test_dit_condition_embedder_constructor(condition_dim):
-    """Test DiTConditionEmbedder constructor with different condition dims."""
-    model = DiTConditionEmbedder(hidden_size=256, condition_dim=condition_dim)
-    assert model.output_dim == 256
-    if condition_dim > 0:
-        assert model.cond_embedder is not None
-    else:
-        assert model.cond_embedder is None
-
-
 def test_dit_condition_embedder_forward(device):
     """Test DiTConditionEmbedder forward pass."""
     torch.manual_seed(42)
@@ -63,17 +52,30 @@ def test_dit_condition_embedder_forward(device):
     assert out_none.shape == (batch_size, hidden_size)
 
 
-@pytest.mark.parametrize("label_dim", [0, 128])
-def test_edm_condition_embedder_constructor(label_dim):
-    """Test EDMConditionEmbedder constructor with different label dims."""
+@pytest.mark.parametrize(
+    "condition_dim,legacy_condition_bias,expect_map_condition",
+    [
+        (0, False, False),  # No condition, no legacy -> no map_condition
+        (0, True, True),  # No condition, legacy -> map_condition with in_features=0
+        (128, False, True),  # With condition -> map_condition
+    ],
+)
+def test_edm_condition_embedder_constructor(
+    condition_dim, legacy_condition_bias, expect_map_condition
+):
+    """Test EDMConditionEmbedder constructor with different condition dims and legacy bias."""
     model = EDMConditionEmbedder(
-        emb_channels=256, noise_channels=64, label_dim=label_dim
+        emb_channels=256,
+        noise_channels=64,
+        condition_dim=condition_dim,
+        legacy_condition_bias=legacy_condition_bias,
     )
     assert model.output_dim == 256
-    if label_dim > 0:
-        assert model.map_label is not None
+    if expect_map_condition:
+        assert model.map_condition is not None
+        assert model.map_condition.in_features == condition_dim
     else:
-        assert model.map_label is None
+        assert model.map_condition is None
 
 
 def test_edm_condition_embedder_forward(device):
@@ -82,16 +84,18 @@ def test_edm_condition_embedder_forward(device):
 
     emb_channels = 256
     noise_channels = 64
-    label_dim = 32
+    condition_dim = 32
     batch_size = 4
 
     model = EDMConditionEmbedder(
-        emb_channels=emb_channels, noise_channels=noise_channels, label_dim=label_dim
+        emb_channels=emb_channels,
+        noise_channels=noise_channels,
+        condition_dim=condition_dim,
     ).to(device)
     model.eval()
 
     t = torch.rand(batch_size).to(device)
-    condition = torch.randn(batch_size, label_dim).to(device)
+    condition = torch.randn(batch_size, condition_dim).to(device)
 
     with torch.no_grad():
         output = model(t, condition=condition)
@@ -100,15 +104,6 @@ def test_edm_condition_embedder_forward(device):
         output,
         file_name="models/dit/data/edm_condition_embedder_output.pth",
     )
-
-
-def test_edm_condition_embedder_legacy_label_bias():
-    """Test legacy_label_bias creates map_label even with label_dim=0."""
-    model = EDMConditionEmbedder(
-        emb_channels=256, noise_channels=64, label_dim=0, legacy_label_bias=True
-    )
-    assert model.map_label is not None
-    assert model.map_label.in_features == 0
 
 
 def test_zero_conditioning_embedder():
