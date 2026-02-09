@@ -205,7 +205,7 @@ class TimmSelfAttention(AttentionModuleBase):
         num_heads: int,
         attn_drop_rate: float = 0.0,
         proj_drop_rate: float = 0.0,
-        qk_norm_type: Optional[Literal["RMSNorm", "LayerNorm"]] = None,
+        qk_norm_type: Literal["RMSNorm", "LayerNorm"] | None = None,
         qk_norm_affine: bool = True,
         **kwargs: Any,
     ):

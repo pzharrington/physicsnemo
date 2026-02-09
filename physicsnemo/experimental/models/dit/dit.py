@@ -112,8 +112,9 @@ class DiT(Module):
         Additional keyword arguments to be passed to :class:`physicsnemo.nn.PositionalEmbedding`.
     attn_kwargs (Dict[str, Any], optional):
         Additional keyword arguments for the attention module constructor, if using a custom attention backend.
-    drop_path (float, optional):
-        DropPath rate for stochastic depth. Uses linear schedule from 0 to drop_path across blocks. Defaults to 0.0.
+    drop_path_rates (list[float], optional):
+        DropPath (stochastic depth) rates, one per block. Must have length equal to ``depth``.
+        If None, no drop path is applied (all zeros). Defaults to None.
     force_tokenization_fp32 (bool, optional):
         If True, forces the tokenization and de-tokenization operations to be run in fp32. Defaults to False.
     
@@ -181,7 +182,7 @@ class DiT(Module):
         detokenizer_kwargs: Dict[str, Any] = {},
         block_kwargs: Dict[str, Any] = {},
         attn_kwargs: Dict[str, Any] = {},
-        drop_path: float = 0.0,
+        drop_path_rates: list[float] | None = None,
         force_tokenization_fp32: bool = False,
     ):
         super().__init__(meta=MetaData())
@@ -262,8 +263,14 @@ class DiT(Module):
             self.detokenizer = detokenizer
 
 
-        # Linear drop_path schedule: 0 -> drop_path
-        drop_path_rates = [drop_path * i / max(1, depth - 1) for i in range(depth)]
+        # Validate drop_path_rates
+        if drop_path_rates is None:
+            drop_path_rates = [0.0] * depth
+        else:
+            if len(drop_path_rates) != depth:
+                raise ValueError(
+                    f"drop_path_rates length ({len(drop_path_rates)}) must match DiT depth ({depth})"
+                )
 
         blocks = []
         for i in range(depth):
