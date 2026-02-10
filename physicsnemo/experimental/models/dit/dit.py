@@ -163,6 +163,38 @@ class DiT(Module):
     torch.Size([2, 3, 32, 64])
     """
 
+    __model_checkpoint_version__ = "0.2.0"
+    __supported_model_checkpoint_version__ = {
+        "0.1.0": "Automatically converting legacy DiT checkpoint timestep / conditioning embedder arguments.",
+    }
+
+    @classmethod
+    def _backward_compat_arg_mapper(
+        cls, version: str, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        r"""
+        Map arguments from legacy checkpoints to the current format.
+
+        Parameters
+        ----------
+        version : str
+            Version of the checkpoint being loaded.
+        args : Dict[str, Any]
+            Arguments dictionary from the checkpoint.
+
+        Returns
+        -------
+        Dict[str, Any]
+            Updated arguments dictionary compatible with the current version.
+        """
+        args = super()._backward_compat_arg_mapper(version, args)
+        if version != "0.1.0":
+            return args
+        
+        if "timestep_embed_kwargs" in args:
+            args["conditioning_embedder_kwargs"] = args.pop("timestep_embed_kwargs")
+        return args
+
     def __init__(
         self,
         input_size: Union[int, Tuple[int]],
@@ -302,6 +334,40 @@ class DiT(Module):
             self.initialize_weights()
 
         self.force_tokenization_fp32 = force_tokenization_fp32
+        self.register_load_state_dict_pre_hook(self._migrate_legacy_checkpoint)
+
+    @staticmethod
+    def _migrate_legacy_checkpoint(
+        module,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
+        """Remap legacy state_dict keys where timestep embedder was at root.
+
+        Previous versions stored the timestep embedder at root
+        (e.g. ``t_embedder.mlp.0.weight``). The current model nests it under
+        ``conditioning_embedder`` (e.g. ``conditioning_embedder.t_embedder.mlp.0.weight``).
+        This pre-hook rewrites those keys in-place so loading succeeds. It also
+        drops the positional embedding "freqs" key, which is not part of the state_dict
+        anymore due to the usage of `persistent=False`. 
+        """
+        legacy_prefix = "t_embedder."
+        new_prefix = "conditioning_embedder.t_embedder."
+
+        # Iterate over a snapshot of keys to avoid mutating dict while iterating
+        for old_key in list(state_dict.keys()):
+            if not old_key.startswith(legacy_prefix):
+                continue
+            new_key = new_prefix + old_key[len(legacy_prefix) :]
+            if old_key == legacy_prefix+"freqs":
+                del state_dict[old_key]
+            elif new_key not in state_dict:
+                state_dict[new_key] = state_dict.pop(old_key)
 
     def initialize_weights(self):
         # Apply a basic Xavier uniform initialization to all linear layers.
