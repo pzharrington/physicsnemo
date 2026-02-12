@@ -28,8 +28,8 @@ from physicsnemo.models.dit.conditioning_embedders import (
     get_conditioning_embedder,
 )
 from physicsnemo.models.dit.layers import (
-    DiTBlock,
     DetokenizerModuleBase,
+    DiTBlock,
     TokenizerModuleBase,
     get_detokenizer,
     get_tokenizer,
@@ -197,9 +197,8 @@ class DiT(Module):
         attention_backend: Literal["timm", "transformer_engine", "natten2d"] = "timm",
         layernorm_backend: Literal["apex", "torch"] = "torch",
         condition_dim: Optional[int] = None,
-        conditioning_embedder: Literal[
-            "dit", "edm", "zero"
-        ] | ConditioningEmbedder = "dit",
+        conditioning_embedder: Literal["dit", "edm", "zero"]
+        | ConditioningEmbedder = "dit",
         dit_initialization: Optional[int] = True,
         conditioning_embedder_kwargs: Dict[str, Any] = {},
         tokenizer_kwargs: Dict[str, Any] = {},
@@ -311,10 +310,8 @@ class DiT(Module):
                     f"drop_path_rates length ({len(drop_path_rates)}) must match DiT depth ({depth})"
                 )
 
-        blocks = []
-        for i in range(depth):
-
-            blocks.append(
+        self.blocks = nn.ModuleList(
+            [
                 DiTBlock(
                     hidden_size,
                     num_heads,
@@ -326,8 +323,9 @@ class DiT(Module):
                     **block_kwargs,
                     **attn_kwargs,
                 )
-            )
-        self.blocks = nn.ModuleList(blocks)
+                for i in range(depth)
+            ]
+        )
 
         if dit_initialization:
             self.initialize_weights()

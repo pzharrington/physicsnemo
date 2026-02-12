@@ -13,26 +13,30 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import math
 import warnings
-from functools import partial
-from typing import Any, Dict, Literal, Union, Optional, Tuple
 from abc import ABC, abstractmethod
+from functools import partial
+from typing import Any, Dict, Literal, Optional, Tuple, Union
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
-from importlib.metadata import version
-from packaging.version import Version
+from timm.layers import RmsNorm
 
+from physicsnemo.core import Module
 from physicsnemo.core.version_check import OptionalImport, check_version_spec
+from physicsnemo.domain_parallel import ShardTensor
+from physicsnemo.domain_parallel.shard_utils.natten_patches import partial_na2d
+from physicsnemo.nn import DropPath, Mlp
+from physicsnemo.nn.module.utils import PatchEmbed2D
 
 timm_v1_0_16 = check_version_spec("timm", "1.0.16", hard_fail=False)
 if timm_v1_0_16:
     from timm.layers.attention import Attention
 else:
     from timm.models.vision_transformer import Attention
-from timm.layers import RmsNorm
+
 
 te = OptionalImport("transformer_engine.pytorch")
 apex_normalization = OptionalImport("apex.normalization")
@@ -41,14 +45,6 @@ natten_functional = OptionalImport("natten.functional")
 TE_AVAILABLE = te.available
 APEX_AVAILABLE = apex_normalization.available
 NATTEN_AVAILABLE = natten_functional.available
-
-from physicsnemo.core import Module
-from physicsnemo.nn import Mlp, PositionalEmbedding, Linear
-from physicsnemo.domain_parallel import ShardTensor
-from physicsnemo.domain_parallel.shard_utils.natten_patches import partial_na2d
-
-from physicsnemo.nn import DropPath
-from physicsnemo.nn.module.utils import PatchEmbed2D
 
 
 def get_layer_norm(
@@ -85,9 +81,7 @@ def get_layer_norm(
             hidden_size, elementwise_affine=elementwise_affine, eps=eps
         )
     if layernorm_backend == "torch":
-        return nn.LayerNorm(
-            hidden_size, elementwise_affine=elementwise_affine, eps=eps
-        )
+        return nn.LayerNorm(hidden_size, elementwise_affine=elementwise_affine, eps=eps)
     raise ValueError("layernorm_backend must be one of 'apex' or 'torch'.")
 
 
@@ -448,9 +442,8 @@ class Natten2DSelfAttention(AttentionModuleBase):
 
         # Project to query, key, value and split into heads
         qkv = self.qkv(x)
-        qkv = (
-            qkv.reshape(B, N, 3, self.num_heads, self.head_dim)
-            .permute(2, 0, 3, 1, 4)
+        qkv = qkv.reshape(B, N, 3, self.num_heads, self.head_dim).permute(
+            2, 0, 3, 1, 4
         )  # (3, B, num_heads, N, head_dim)
         q, k, v = qkv.unbind(0)
         q, k = self.q_norm(q), self.k_norm(k)
@@ -745,7 +738,9 @@ class DiTBlock(nn.Module):
         )
 
         # Feed-forward block
-        modulated_mlp_input = self.modulation(self.pre_mlp_norm(x), mlp_scale, mlp_shift)
+        modulated_mlp_input = self.modulation(
+            self.pre_mlp_norm(x), mlp_scale, mlp_shift
+        )
         mlp_output = self.linear(modulated_mlp_input)
         x = torch.addcmul(x, self.drop_path(mlp_gate.unsqueeze(1)), mlp_output)
 

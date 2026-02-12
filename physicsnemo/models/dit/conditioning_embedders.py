@@ -255,7 +255,9 @@ class EDMConditionEmbedder(Module):
                     torch.rand([t.shape[0], 1], device=tmp.device)
                     >= self.condition_dropout
                 ).to(tmp.dtype)
-            emb = emb + self.map_condition(tmp * math.sqrt(self.map_condition.in_features))
+            emb = emb + self.map_condition(
+                tmp * math.sqrt(self.map_condition.in_features)
+            )
 
         # MLP
         emb = torch.nn.functional.silu(self.map_layer0(emb))
