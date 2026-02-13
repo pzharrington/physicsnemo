@@ -22,6 +22,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
+from jaxtyping import Float
 from timm.layers import RmsNorm
 
 from physicsnemo.core import Module
@@ -164,7 +165,9 @@ class AttentionModuleBase(Module, ABC):
     """
 
     @abstractmethod
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: Float[torch.Tensor, "batch sequence hidden_size"]
+    ) -> Float[torch.Tensor, "batch sequence hidden_size"]:
         pass
 
 
@@ -237,8 +240,10 @@ class TimmSelfAttention(AttentionModuleBase):
         )
 
     def forward(
-        self, x: torch.Tensor, attn_mask: Optional[torch.Tensor] = None
-    ) -> torch.Tensor:
+        self,
+        x: Float[torch.Tensor, "batch sequence hidden_size"],
+        attn_mask: Optional[Float[torch.Tensor, "..."]] = None,
+    ) -> Float[torch.Tensor, "batch sequence hidden_size"]:
         if attn_mask is not None and not timm_v1_0_16:
             raise ValueError(
                 "attn_mask in TimmSelfAttention is only supported for timm version 1.0.16 and higher"
@@ -322,10 +327,10 @@ class TESelfAttention(AttentionModuleBase):
 
     def forward(
         self,
-        x: torch.Tensor,
-        attn_mask: Optional[torch.Tensor] = None,
+        x: Float[torch.Tensor, "batch sequence hidden_size"],
+        attn_mask: Optional[Float[torch.Tensor, "..."]] = None,
         mask_type: Optional[str] = "no_mask",
-    ) -> torch.Tensor:
+    ) -> Float[torch.Tensor, "batch sequence hidden_size"]:
         if attn_mask is not None:
             mask_type = "arbitrary"
         out = self.attn_op(x, attention_mask=attn_mask, attn_mask_type=mask_type)
@@ -431,7 +436,11 @@ class Natten2DSelfAttention(AttentionModuleBase):
         self.attn_drop = nn.Dropout(attn_drop_rate)
         self.proj_drop = nn.Dropout(proj_drop_rate)
 
-    def forward(self, x: torch.Tensor, latent_hw: Tuple[int, int]) -> torch.Tensor:
+    def forward(
+        self,
+        x: Float[torch.Tensor, "batch sequence hidden_size"],
+        latent_hw: Tuple[int, int],
+    ) -> Float[torch.Tensor, "batch sequence hidden_size"]:
         B, N, C = x.shape
         h, w = latent_hw
 
@@ -510,8 +519,10 @@ class PerSampleDropout(nn.Module):
         self.inplace = inplace
 
     def forward(
-        self, x: torch.Tensor, p: Optional[float | torch.Tensor] = None
-    ) -> torch.Tensor:
+        self,
+        x: Float[torch.Tensor, "batch sequence hidden_size"],
+        p: Optional[float | Float[torch.Tensor, " batch"]] = None,
+    ) -> Float[torch.Tensor, "batch sequence hidden_size"]:
         if (not self.training) or p is None:
             return x
 
@@ -702,11 +713,11 @@ class DiTBlock(nn.Module):
 
     def forward(
         self,
-        x: torch.Tensor,
-        c: torch.Tensor,
+        x: Float[torch.Tensor, "batch sequence hidden_size"],
+        c: Float[torch.Tensor, "batch condition_embed_dim"],
         attn_kwargs: Dict[str, Any] = {},
-        p_dropout: Optional[float | torch.Tensor] = None,
-    ) -> torch.Tensor:
+        p_dropout: Optional[float | Float[torch.Tensor, " batch"]] = None,
+    ) -> Float[torch.Tensor, "batch sequence hidden_size"]:
         (
             attention_shift,
             attention_scale,
@@ -795,7 +806,11 @@ class ProjLayer(nn.Module):
             1 + scale.unsqueeze(1)
         ) + shift.unsqueeze(1)
 
-    def forward(self, x: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: Float[torch.Tensor, "batch sequence hidden_size"],
+        c: Float[torch.Tensor, "batch hidden_size"],
+    ) -> Float[torch.Tensor, "batch sequence emb_channels"]:
         shift, scale = self.adaptive_modulation(c).chunk(2, dim=1)
         modulated_output = self.modulation(self.proj_layer_norm(x), scale, shift)
         projected_output = self.output_projection(modulated_output)
@@ -824,7 +839,9 @@ class TokenizerModuleBase(Module, ABC):
     """
 
     @abstractmethod
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: Float[torch.Tensor, "batch channels *spatial_dims"]
+    ) -> Float[torch.Tensor, "batch sequence token_dim"]:
         pass
 
     @abstractmethod
@@ -909,7 +926,9 @@ class PatchEmbed2DTokenizer(TokenizerModuleBase):
         if isinstance(self.pos_embed, nn.Parameter):
             nn.init.normal_(self.pos_embed, std=0.02)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: Float[torch.Tensor, "batch channels height width"]
+    ) -> Float[torch.Tensor, "batch sequence hidden_size"]:
         # (B, D, Hp, Wp)
         x_emb = self.x_embedder(x)
         # (B, L, D) + positional embedding
@@ -983,7 +1002,11 @@ class DetokenizerModuleBase(Module, ABC):
     """
 
     @abstractmethod
-    def forward(self, x_tokens: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x_tokens: Float[torch.Tensor, "batch sequence token_dim"],
+        c: Float[torch.Tensor, "batch condition_dim"],
+    ) -> Float[torch.Tensor, "batch out_channels *spatial_dims"]:
         pass
 
     @abstractmethod
@@ -1052,7 +1075,11 @@ class ProjReshape2DDetokenizer(DetokenizerModuleBase):
         nn.init.constant_(self.proj_layer.output_projection.weight, 0)
         nn.init.constant_(self.proj_layer.output_projection.bias, 0)
 
-    def forward(self, x_tokens: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x_tokens: Float[torch.Tensor, "batch sequence hidden_size"],
+        c: Float[torch.Tensor, "batch hidden_size"],
+    ) -> Float[torch.Tensor, "batch out_channels height width"]:
         # Project tokens to per-patch pixel embeddings
         x = self.proj_layer(x_tokens, c)  # (B, L, p0*p1*C_out)
 

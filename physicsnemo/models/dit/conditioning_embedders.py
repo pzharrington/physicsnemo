@@ -22,6 +22,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import torch
 import torch.nn as nn
+from jaxtyping import Float
 
 from physicsnemo.core import Module
 from physicsnemo.nn import Linear, PositionalEmbedding
@@ -52,7 +53,9 @@ class ConditioningEmbedder(Protocol):
         r"""Output dimension of conditioning embedding."""
         ...
 
-    def forward(self, t: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(
+        self, t: Float[torch.Tensor, " batch"], **kwargs
+    ) -> Float[torch.Tensor, "batch embedding_dim"]:
         r"""Compute conditioning embedding from timestep and optional inputs."""
         ...
 
@@ -92,7 +95,9 @@ class ZeroConditioningEmbedder(Module):
     def output_dim(self) -> int:
         return self._output_dim
 
-    def forward(self, t: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(
+        self, t: Float[torch.Tensor, " batch"], **kwargs
+    ) -> Float[torch.Tensor, "batch 0"]:
         return torch.empty(t.shape[0], 0, device=t.device, dtype=t.dtype)
 
 
@@ -162,8 +167,11 @@ class DiTConditionEmbedder(Module):
         return self._output_dim
 
     def forward(
-        self, t: torch.Tensor, condition: torch.Tensor | None = None, **kwargs
-    ) -> torch.Tensor:
+        self,
+        t: Float[torch.Tensor, " batch"],
+        condition: Float[torch.Tensor, "batch condition_dim"] | None = None,
+        **kwargs,
+    ) -> Float[torch.Tensor, "batch hidden_size"]:
         c = self.t_embedder(t)
 
         if self.cond_embedder is not None and condition is not None:
@@ -242,8 +250,11 @@ class EDMConditionEmbedder(Module):
         return self._output_dim
 
     def forward(
-        self, t: torch.Tensor, condition: torch.Tensor | None = None, **kwargs
-    ) -> torch.Tensor:
+        self,
+        t: Float[torch.Tensor, " batch"],
+        condition: Float[torch.Tensor, "batch condition_dim"] | None = None,
+        **kwargs,
+    ) -> Float[torch.Tensor, "batch emb_channels"]:
         emb = self.map_noise(t)
 
         # Add condition embedding before final MLP

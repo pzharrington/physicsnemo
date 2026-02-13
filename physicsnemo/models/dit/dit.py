@@ -19,6 +19,7 @@ from typing import Any, Dict, Literal, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
+from jaxtyping import Float
 
 from physicsnemo.core.meta import ModelMetaData
 from physicsnemo.core.module import Module
@@ -424,13 +425,13 @@ class DiT(Module):
 
     def forward(
         self,
-        x: torch.Tensor,
-        t: torch.Tensor,
-        condition: Optional[torch.Tensor] = None,
-        p_dropout: Optional[float | torch.Tensor] = None,
+        x: Float[torch.Tensor, "batch in_channels *spatial_dims"],
+        t: Float[torch.Tensor, " batch"],
+        condition: Optional[Float[torch.Tensor, "batch condition_dim"]] = None,
+        p_dropout: Optional[float | Float[torch.Tensor, " batch"]] = None,
         attn_kwargs: Dict[str, Any] = {},
         tokenizer_kwargs: Dict[str, Any] = {},
-    ) -> torch.Tensor:
+    ) -> Float[torch.Tensor, "batch out_channels *spatial_dims"]:
         # Tokenize: (B, C, H, W) -> (B, L, D)
         if self.force_tokenization_fp32:
             dtype = x.dtype
