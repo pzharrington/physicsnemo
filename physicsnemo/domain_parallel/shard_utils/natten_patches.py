@@ -202,7 +202,7 @@ def partial_na2d(
         lv = halo_padding(lv, v._spec.mesh, halo_config)
 
     # Apply native na2d operation (dilation explicit; other options via na2d_kwargs)
-    x = base_func(lq, lk, lv, kernel_size, dilation=dilation, **na2d_kwargs)
+    x = base_func(lq, lk, lv, kernel_size=kernel_size, dilation=dilation, **na2d_kwargs)
 
     # Remove halos and convert back to ShardTensor
     # x = UnSliceHaloND.apply(x, halo, q._spec)
