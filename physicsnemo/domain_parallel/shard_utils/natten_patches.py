@@ -170,7 +170,7 @@ def partial_na2d(
         Dilation factor for attention kernel.
     base_func : Callable
         The base neighborhood attention function to call with padded tensors. Called as
-        ``base_func(lq, lk, lv, kernel_size, dilation=dilation, **na2d_kwargs)``.
+        ``base_func(lq, lk, lv, kernel_size=kernel_size, dilation=dilation, **na2d_kwargs)``.
     **na2d_kwargs : Any
         Additional keyword arguments passed through to ``base_func`` (e.g. ``is_causal``, ``scale``, ``stride``).
 
