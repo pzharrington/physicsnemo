@@ -365,7 +365,7 @@ class ModAFNO(Module):
         else:
             embed_model = {} if embed_model is None else embed_model
             self.mod_embed_net = ModEmbedNet(**embed_model)
-            
+
         self.register_load_state_dict_pre_hook(self._migrate_legacy_checkpoint)
 
     @staticmethod
