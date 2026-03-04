@@ -41,7 +41,7 @@ These models can make longer forecasts (more than one timestep) during inference
 ## Getting started
 
 ### Preliminaries
-Start by installing PhysicsNeMo (if not already installed) and copying this folder (`examples/weather/stormcast`) to a system with a GPU available. Also, prepare a combined HRRR/ERA5 dataset in the form specified in `datasets/data_loader_hrrr_era5.py` or implement a custom dataset class as shown below under [Adding custom datasets](#adding-custom-datasets). (**Note: subsequent versions of this example will include more detailed dataset preparation instructions**)
+Start by installing PhysicsNeMo (if not already installed) with the `datapipes-extras`, `nn-extras`, and `utils-extras` optional dependency groups, and copy this folder (`examples/weather/stormcast`) to a system with a GPU available. Also, prepare a combined HRRR/ERA5 dataset in the form specified in `datasets/data_loader_hrrr_era5.py` or implement a custom dataset class as shown below under [Adding custom datasets](#adding-custom-datasets).
 
 ### Testing
 

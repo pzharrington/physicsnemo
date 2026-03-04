@@ -29,14 +29,19 @@ import pytest
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch.distributed.checkpoint.state_dict import (
+    StateDictOptions,
+    get_model_state_dict,
+)
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
-from torch.distributed.tensor import distribute_tensor
+from torch.distributed.tensor import DTensor, distribute_module, distribute_tensor
 from torch.distributed.tensor.placement_types import Shard
 
+from physicsnemo.core.version_check import check_version_spec
 from physicsnemo.distributed import DistributedManager
 from physicsnemo.models.mlp import FullyConnected
 from physicsnemo.utils import load_checkpoint, save_checkpoint
@@ -143,12 +148,7 @@ def test_fsdp_checkpoint_roundtrip(shared_tmp_dir):
 # FSDP + ShardTensor on 2-D mesh  (ddp × domain)
 # ---------------------------------------------------------------------------
 
-try:
-    from physicsnemo.core.version_check import check_version_spec
-
-    _HAS_TORCH_26 = check_version_spec("torch", "2.6.0", hard_fail=False)
-except Exception:
-    _HAS_TORCH_26 = False
+_HAS_TORCH_26 = check_version_spec("torch", "2.6.0", hard_fail=False)
 
 
 class _PosEmbedModel(nn.Module):
@@ -189,12 +189,6 @@ def _partition_pos_embed(
 @pytest.mark.skipif(not _HAS_TORCH_26, reason="ShardTensor requires torch >= 2.6")
 def test_fsdp_shard_tensor_checkpoint_roundtrip(shared_tmp_dir):
     """Checkpoint round-trip with a 2-D mesh: FSDP(NO_SHARD) on ddp, ShardTensor on domain."""
-    from torch.distributed.checkpoint.state_dict import (
-        get_model_state_dict,
-        StateDictOptions,
-    )
-    from torch.distributed.tensor import distribute_module
-    from torch.distributed.tensor import DTensor
     torch.manual_seed(0)
 
     dm = DistributedManager()
@@ -318,8 +312,3 @@ def test_non_distributed_fallback(shared_tmp_dir):
     with torch.no_grad():
         loaded = model2(x)
     assert torch.allclose(ref, loaded, rtol=1e-5, atol=1e-5)
-
-
-if __name__ == "__main__":
-    DistributedManager.initialize()
-    test_fsdp_shard_tensor_checkpoint_roundtrip(shared_tmp_dir)

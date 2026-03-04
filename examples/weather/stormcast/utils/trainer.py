@@ -119,38 +119,17 @@ class Trainer:
         # Initialize components
         self._setup_data()
 
-        # Placeholder model+optimizer for checkpoint loading/saving (rank 0 only, kept on CPU)
-        if self.dist.rank == 0:
-            self.net_full = self._setup_model()
-            (self.optimizer_full, self.scheduler_full) = self._setup_optimizer(
-                self.net_full
-            )
-            (self.total_steps, self.val_loss) = self._resume_or_init(
-                self.net_full, self.optimizer_full, self.scheduler_full
-            )
-        else:
-            self.net_full = self.optimizer_full = self.scheduler_full = None
-
-        (self.total_steps, self.val_loss) = self.parallel_helper.scatter_object(
-            (self.total_steps, self.val_loss) if self.dist.rank == 0 else None
-        )
-
-        # Actual models
+        # Create model and move to device
         self.net = self._setup_model()
         self.logger.info(str(self.net))
-        self.net.load_state_dict(  # TODO: avoid replicating full state_dict on every rank
-            self.parallel_helper.scatter_object(
-                self.net_full.state_dict() if self.dist.rank == 0 else {}
-            )
-        )
         self.net.train().requires_grad_(True).to(
             device=self.device, memory_format=self.memory_format
         )
+
         # Load regression net if needed
         self.regression_net = self._load_regression_net()
 
-        # Sharding
-
+        # Sharding and FSDP wrapping
         if self.use_shard_tensor:
             self.logger.info(
                 "Distributing model with FSDP and sharding for domain parallelism"
@@ -166,19 +145,12 @@ class Trainer:
             self.invariant_tensor = self.parallel_helper.distribute_tensor(
                 self.invariant_tensor
             )
-        # Create optimizer on sharded net
-        (self.optimizer, self.scheduler) = self._setup_optimizer(
-            self.net
-        )  # for sharded net
-        if self.total_steps > 0:
-            self.parallel_helper.scatter_optimizer_state(
-                self.net_full,
-                self.optimizer_full,
-                self.scheduler_full,
-                self.net,
-                self.optimizer,
-                self.scheduler,
-            )
+
+        # Create optimizer on the distributed model
+        (self.optimizer, self.scheduler) = self._setup_optimizer(self.net)
+
+        # Resume from checkpoint (all ranks participate)
+        (self.total_steps, self.val_loss) = self._resume_or_init()
 
         # Loss function
         self.loss_fn = self._setup_loss()
@@ -529,27 +501,13 @@ class Trainer:
 
         return (optimizer, scheduler)
 
-    def _resume_or_init(
-        self,
-        net: Module,
-        optimizer: torch.optim.Optimizer,
-        scheduler: torch.optim.lr_scheduler.LRScheduler | None,
-    ) -> tuple[int, float]:
+    def _resume_or_init(self) -> tuple[int, float]:
         r"""
         Resume from checkpoint or initialize training.
 
-        Attempts to load model, optimizer, and scheduler state from checkpoint.
-        If no checkpoint exists, optionally loads initial weights from a separate file.
-        Re-seeds RNG for reproducibility after checkpoint load.
-
-        Parameters
-        ----------
-        net : physicsnemo.core.Module
-            The module to load the checkpoint into.
-        optimizer : torch.optim.Optimizer
-            The optimizer to load the optimizer state into.
-        scheduler : torch.optim.Optimizer | None
-            The scheduler to load the scheduler state into, or None if no scheduler if used.
+        All ranks participate.  The distributed checkpoint utilities handle
+        gathering (save) and scattering (load) of FSDP / ShardTensor state
+        automatically.
 
         Returns
         -------
@@ -562,32 +520,77 @@ class Trainer:
         """
         self.logger.info(f'Trying to resume from "{self.ckpt_path}"...')
 
-        # Load checkpoint with metadata
-        metadata_dict = {}
+        metadata_dict: dict = {}
         total_steps = load_checkpoint(
             path=self.ckpt_path,
-            models=net,
-            optimizer=optimizer,
-            scheduler=scheduler,
+            models=self.net,
+            optimizer=self.optimizer,
+            scheduler=self.scheduler,
             epoch=None
             if self.cfg.training.resume_checkpoint == "latest"
             else self.cfg.training.resume_checkpoint,
             metadata_dict=metadata_dict,
+            optimizer_model=self.net,
         )
 
-        # Load validation loss from metadata
         val_loss = metadata_dict.get("val_loss", -1.0)
 
         if total_steps == 0:
             self.logger.info("No resumable state found.")
             init_weights = self.cfg.training.initial_weights
-            if init_weights is None:
-                self.logger.info("Starting training from scratch...")
-            else:
+            if init_weights is not None:
                 self.logger.info(f"Loading initial weights from {init_weights}...")
-                net.load(init_weights)
+                self._load_initial_weights(init_weights)
+            else:
+                self.logger.info("Starting training from scratch...")
 
         return (total_steps, val_loss)
+
+    def _load_initial_weights(self, weights_path: str) -> None:
+        r"""Load initial weights into the (potentially FSDP-wrapped) model.
+
+        For distributed models the state dict is loaded on rank 0 and
+        scattered to all ranks via DCP ``set_model_state_dict``.
+
+        Parameters
+        ----------
+        weights_path : str
+            Path to a ``.mdlus`` checkpoint file.
+        """
+        from physicsnemo.utils.checkpoint import (
+            _extract_mdlus_state_dict,
+            _get_dtensor_param_placements,
+            _get_inner_module,
+            _is_distributed_model,
+            _redistribute_sd_for_dtensor,
+        )
+
+        if _is_distributed_model(self.net):
+            from torch.distributed.checkpoint.state_dict import (
+                set_model_state_dict,
+                StateDictOptions,
+            )
+
+            state_dict = {}
+            if self.dist.rank == 0:
+                state_dict = _extract_mdlus_state_dict(weights_path)
+
+            dtensor_plc = _get_dtensor_param_placements(self.net)
+            if dtensor_plc:
+                sd_list: list = [state_dict]
+                torch.distributed.broadcast_object_list(sd_list, src=0)
+                state_dict = _redistribute_sd_for_dtensor(
+                    dtensor_plc, sd_list[0]
+                )
+                options = StateDictOptions(full_state_dict=True)
+            else:
+                options = StateDictOptions(
+                    full_state_dict=True, broadcast_from_rank0=True
+                )
+            set_model_state_dict(self.net, state_dict, options=options)
+        else:
+            inner = _get_inner_module(self.net)
+            inner.load(weights_path)
 
     # =========================================================================
     # Training Step
@@ -897,27 +900,18 @@ class Trainer:
         r"""
         Save training checkpoint with metadata.
 
-        Saves model weights, optimizer state, scheduler state, and validation loss
-        to the checkpoint directory. Only rank 0 saves to avoid file conflicts.
+        All ranks participate; the checkpoint utilities handle gathering
+        FSDP / ShardTensor state automatically and only rank 0 writes files.
         """
-        self.parallel_helper.gather_training_state(
-            self.net,
-            self.optimizer,
-            self.scheduler,
-            self.net_full,
-            self.optimizer_full,
-            self.scheduler_full,
+        save_checkpoint(
+            path=self.ckpt_path,
+            models=self.net,
+            optimizer=self.optimizer,
+            scheduler=self.scheduler,
+            epoch=self.total_steps,
+            metadata={"val_loss": self.val_loss},
+            optimizer_model=self.net,
         )
-
-        if self.dist.rank == 0:
-            save_checkpoint(
-                path=self.ckpt_path,
-                models=self.net_full,
-                optimizer=self.optimizer_full,
-                scheduler=self.scheduler_full,
-                epoch=self.total_steps,
-                metadata={"val_loss": self.val_loss},
-            )
 
     # =========================================================================
     # Main Training Loop

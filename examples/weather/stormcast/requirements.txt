@@ -1,3 +1,4 @@
 pyproj
 pydantic
 torch-optimi[optimi]
+tensorboard

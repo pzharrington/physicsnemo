@@ -40,6 +40,15 @@ import fsspec
 import fsspec.utils
 import torch
 from torch.amp import GradScaler
+from torch.distributed.checkpoint.state_dict import (
+    StateDictOptions,
+    get_model_state_dict,
+    get_optimizer_state_dict,
+    set_model_state_dict,
+    set_optimizer_state_dict,
+)
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.tensor import DTensor, Replicate, distribute_tensor
 from torch.optim.lr_scheduler import LRScheduler
 
 import physicsnemo
@@ -57,19 +66,9 @@ checkpoint_logging = PythonLogger("checkpoint")
 
 def _is_distributed_model(model: torch.nn.Module) -> bool:
     """Return ``True`` when *model* is FSDP-wrapped or has DTensor params."""
-    try:
-        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-
-        if isinstance(model, FSDP):
-            return True
-    except ImportError:
-        pass
-    try:
-        from torch.distributed.tensor import DTensor
-
-        return any(isinstance(p, DTensor) for p in model.parameters())
-    except ImportError:
-        return False
+    if isinstance(model, FSDP):
+        return True
+    return any(isinstance(p, DTensor) for p in model.parameters())
 
 
 def _unwrap_ddp_compile(
@@ -93,25 +92,15 @@ def _unwrap_ddp_compile(
 
 def _get_model_class_name(model: torch.nn.Module) -> str:
     """Return the class name of the innermost module (looking through FSDP)."""
-    try:
-        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-
-        if isinstance(model, FSDP):
-            return type(model.module).__name__
-    except ImportError:
-        pass
+    if isinstance(model, FSDP):
+        return type(model.module).__name__
     return type(model).__name__
 
 
 def _get_inner_module(model: torch.nn.Module) -> torch.nn.Module:
     """Unwrap one FSDP layer (if present) to reach the user module."""
-    try:
-        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-
-        if isinstance(model, FSDP):
-            return model.module
-    except ImportError:
-        pass
+    if isinstance(model, FSDP):
+        return model.module
     return model
 
 
@@ -140,16 +129,6 @@ def _get_dtensor_param_placements(
 
     **Collective** — all ranks must call this together.
     """
-    try:
-        from torch.distributed.tensor import DTensor
-    except ImportError:
-        return {}
-
-    from torch.distributed.checkpoint.state_dict import (
-        get_model_state_dict,
-        StateDictOptions,
-    )
-
     native_sd = get_model_state_dict(model, options=StateDictOptions())
     info: dict[str, tuple[Any, tuple[Any, ...]]] = {}
     for name, value in native_sd.items():
@@ -169,8 +148,6 @@ def _redistribute_sd_for_dtensor(
     ``distribute_tensor`` so that each rank receives its correct local shard.
     All other entries are left unchanged.
     """
-    from torch.distributed.tensor import DTensor, Replicate, distribute_tensor
-
     if not placements:
         return state_dict
 
@@ -212,8 +189,6 @@ def _redistribute_optim_sd_for_dtensor(
     ``distribute_tensor(...).to_local()`` to extract each rank's shard.
     Scalar state entries (e.g. ``step``) are left unchanged.
     """
-    from torch.distributed.tensor import DTensor, Replicate, distribute_tensor
-
     if not placements or "state" not in optim_sd:
         return optim_sd
 
@@ -542,11 +517,6 @@ def save_checkpoint(
         )
 
         if _is_distributed_model(model):
-            from torch.distributed.checkpoint.state_dict import (
-                get_model_state_dict,
-                StateDictOptions,
-            )
-
             # cpu_offload is handled manually because the DCP option
             # hangs for FSDP NO_SHARD + DTensor topologies.
             options = StateDictOptions(full_state_dict=True)
@@ -581,13 +551,9 @@ def save_checkpoint(
                 None,
             )
             if opt_model is not None:
-                from torch.distributed.checkpoint.state_dict import (
-                    get_optimizer_state_dict,
-                    StateDictOptions,
-                )
-
-                # cpu_offload is handled manually because the DCP option hangs for FSDP NO_SHARD + DTensor topologies.
-                options = StateDictOptions(full_state_dict=True) 
+                # cpu_offload is handled manually because the DCP option
+                # hangs for FSDP NO_SHARD + DTensor topologies.
+                options = StateDictOptions(full_state_dict=True)
                 opt_state_dict = get_optimizer_state_dict(
                     opt_model, optimizer, options=options
                 )
@@ -854,12 +820,6 @@ def _load_checkpoint_distributed(
     is_rank0: bool,
 ) -> int:
     """Distributed load: rank 0 reads files, DCP broadcasts to all ranks."""
-    from torch.distributed.checkpoint.state_dict import (
-        set_model_state_dict,
-        set_optimizer_state_dict,
-        StateDictOptions,
-    )
-
     broadcast_options = StateDictOptions(
         full_state_dict=True, broadcast_from_rank0=True
     )
