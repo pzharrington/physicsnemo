@@ -1,0 +1,325 @@
+# SPDX-FileCopyrightText: Copyright (c) 2023 - 2026 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Distributed checkpoint tests.
+
+Run with::
+
+    torchrun --nproc-per-node 4 -m pytest --multigpu-static \
+        test/utils/test_checkpoint_distributed.py -x
+"""
+
+import shutil
+import tempfile
+
+import pytest
+import torch
+import torch.distributed as dist
+import torch.nn as nn
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    ShardingStrategy,
+)
+from torch.distributed.tensor import distribute_tensor
+from torch.distributed.tensor.placement_types import Shard
+
+from physicsnemo.distributed import DistributedManager
+from physicsnemo.models.mlp import FullyConnected
+from physicsnemo.utils import load_checkpoint, save_checkpoint
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def shared_tmp_dir():
+    """Broadcast a temp directory from rank 0 so all ranks use the same path."""
+    dm = DistributedManager()
+    d = tempfile.mkdtemp() if dm.rank == 0 else ""
+    obj = [d]
+    dist.broadcast_object_list(obj, src=0)
+    path = obj[0]
+    yield path
+    dist.barrier()
+    if dm.rank == 0:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Plain FSDP (1-D mesh, no domain sharding)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.multigpu_static
+def test_fsdp_checkpoint_roundtrip(shared_tmp_dir):
+    """Save and load a plain FSDP model through the checkpoint utilities."""
+    dm = DistributedManager()
+    if dm.world_size < 2:
+        pytest.skip("Need at least 2 ranks")
+
+    device = dm.device
+    mesh = init_device_mesh("cuda", (dm.world_size,), mesh_dim_names=("world",))
+
+    model = FullyConnected(
+        in_features=16, out_features=16, num_layers=2, layer_size=32
+    ).to(device)
+    fsdp_model = FSDP(
+        model, device_mesh=mesh["world"], sharding_strategy=ShardingStrategy.NO_SHARD
+    )
+    optimizer = torch.optim.Adam(fsdp_model.parameters(), lr=1e-3)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5)
+
+    x = torch.randn(4, 16, device=device)
+    for _ in range(3):
+        loss = fsdp_model(x).sum()
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+        scheduler.step()
+
+    with torch.no_grad():
+        ref_output = fsdp_model(x).clone()
+
+    save_checkpoint(
+        shared_tmp_dir,
+        models=fsdp_model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        epoch=3,
+        metadata={"test": True},
+        optimizer_model=fsdp_model,
+    )
+    dist.barrier()
+
+    # Fresh model + FSDP + optimizer, then load
+    model2 = FullyConnected(
+        in_features=16, out_features=16, num_layers=2, layer_size=32
+    ).to(device)
+    fsdp_model2 = FSDP(
+        model2, device_mesh=mesh["world"], sharding_strategy=ShardingStrategy.NO_SHARD
+    )
+    optimizer2 = torch.optim.Adam(fsdp_model2.parameters(), lr=1e-3)
+    scheduler2 = torch.optim.lr_scheduler.StepLR(optimizer2, step_size=5)
+
+    meta: dict = {}
+    epoch = load_checkpoint(
+        shared_tmp_dir,
+        models=fsdp_model2,
+        optimizer=optimizer2,
+        scheduler=scheduler2,
+        metadata_dict=meta,
+        optimizer_model=fsdp_model2,
+    )
+
+    assert epoch == 3
+    assert meta.get("test") is True
+
+    with torch.no_grad():
+        loaded_output = fsdp_model2(x)
+    assert torch.allclose(ref_output, loaded_output, rtol=1e-5, atol=1e-5), (
+        "Model outputs differ after FSDP checkpoint round-trip"
+    )
+    assert scheduler2.last_epoch == scheduler.last_epoch
+
+
+# ---------------------------------------------------------------------------
+# FSDP + ShardTensor on 2-D mesh  (ddp × domain)
+# ---------------------------------------------------------------------------
+
+try:
+    from physicsnemo.core.version_check import check_version_spec
+
+    _HAS_TORCH_26 = check_version_spec("torch", "2.6.0", hard_fail=False)
+except Exception:
+    _HAS_TORCH_26 = False
+
+
+class _PosEmbedModel(nn.Module):
+    """Tiny model with a positional-embedding parameter that is selectively sharded."""
+
+    def __init__(self, embed_tokens: int = 24, embed_dim: int = 8, hidden: int = 16):
+        super().__init__()
+        self.pos_embed = nn.Parameter(torch.randn(1, embed_tokens, embed_dim))
+        self.fc1 = nn.Linear(embed_dim, hidden)
+        self.fc2 = nn.Linear(hidden, embed_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, T, D) where T is sharded across the domain mesh.
+        # Reduce the sharded token dim before the linear layers because
+        # nn.Linear flattens leading dims, which DTensor cannot do across
+        # a sharded dimension.
+        out = x + self.pos_embed
+        out = out.mean(dim=1)  # (B, D)
+        return self.fc2(torch.relu(self.fc1(out)))
+
+
+def _partition_pos_embed(
+    name: str,
+    submodule: nn.Module,
+    device_mesh: torch.distributed.device_mesh.DeviceMesh,
+):
+    """Shard ``pos_embed`` along dim 1 across *device_mesh*."""
+    for key, param in submodule._parameters.items():
+        if param is None:
+            continue
+        if "pos_embed" in key:
+            sharded = distribute_tensor(param, device_mesh=device_mesh, placements=[Shard(1)])
+            submodule.register_parameter(key, nn.Parameter(sharded))
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.multigpu_static
+@pytest.mark.skipif(not _HAS_TORCH_26, reason="ShardTensor requires torch >= 2.6")
+def test_fsdp_shard_tensor_checkpoint_roundtrip(shared_tmp_dir):
+    """Checkpoint round-trip with a 2-D mesh: FSDP(NO_SHARD) on ddp, ShardTensor on domain."""
+    from torch.distributed.checkpoint.state_dict import (
+        get_model_state_dict,
+        StateDictOptions,
+    )
+    from torch.distributed.tensor import distribute_module
+    from torch.distributed.tensor import DTensor
+    torch.manual_seed(0)
+
+    dm = DistributedManager()
+    if dm.world_size < 4 or dm.world_size % 2 != 0:
+        pytest.skip("Need at least 4 ranks (divisible by 2) for 2-D mesh test")
+
+    device = dm.device
+    domain_size = 2
+    dp_size = dm.world_size // domain_size
+    mesh = init_device_mesh(
+        "cuda", (dp_size, domain_size), mesh_dim_names=("ddp", "domain")
+    )
+
+    embed_tokens = 24  # divisible by domain_size=2
+
+    def _build_distributed_model():
+        m = _PosEmbedModel(embed_tokens=embed_tokens, embed_dim=8, hidden=16).to(device)
+        m = distribute_module(m, device_mesh=mesh["domain"], partition_fn=_partition_pos_embed)
+        m = FSDP(m, device_mesh=mesh["ddp"], sharding_strategy=ShardingStrategy.NO_SHARD)
+        return m
+
+    fsdp_model = _build_distributed_model()
+    optimizer = torch.optim.Adam(fsdp_model.parameters(), lr=1e-3)
+
+    # Create and shard input tensor
+    x = torch.randn(2, embed_tokens, 8, device=device)
+    x = distribute_tensor(x, device_mesh=mesh["domain"], placements=[Shard(1)])
+
+    for _ in range(3):
+        loss = fsdp_model(x).sum()
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+    # Capture full model state on rank 0 for reference
+    full_options = StateDictOptions(full_state_dict=True)
+    ref_params = get_model_state_dict(fsdp_model, options=full_options)
+
+    save_checkpoint(
+        shared_tmp_dir,
+        models=fsdp_model,
+        optimizer=optimizer,
+        epoch=3,
+        optimizer_model=fsdp_model,
+    )
+    dist.barrier()
+
+    # Build a fresh distributed model and load
+    fsdp_model2 = _build_distributed_model()
+    optimizer2 = torch.optim.Adam(fsdp_model2.parameters(), lr=1e-3)
+
+    epoch = load_checkpoint(
+        shared_tmp_dir,
+        models=fsdp_model2,
+        optimizer=optimizer2,
+        optimizer_model=fsdp_model2,
+    )
+    assert epoch == 3
+
+    # Verify full model state matches reference
+    loaded_params = get_model_state_dict(fsdp_model2, options=full_options)
+    if dm.rank == 0:
+        for key in ref_params:
+            assert torch.allclose(ref_params[key], loaded_params[key], rtol=1e-5, atol=1e-5), (
+                f"Parameter {key} differs after checkpoint round-trip"
+            )
+
+    # Verify pos_embed is actually sharded (local shapes differ across domain ranks)
+    inner = fsdp_model2.module  # unwrap FSDP
+    local_pos_embed = inner.pos_embed
+    assert isinstance(local_pos_embed, DTensor), "pos_embed should be a DTensor after load"
+
+    local_shape = local_pos_embed.to_local().shape
+    assert local_shape[1] == embed_tokens // domain_size, (
+        f"Expected pos_embed local tokens={embed_tokens // domain_size}, got {local_shape[1]}"
+    )
+
+    # Verify forward pass matches
+    with torch.no_grad():
+        out1 = fsdp_model(x).full_tensor()
+        out2 = fsdp_model2(x).full_tensor()
+    assert torch.allclose(out1, out2, rtol=1e-5, atol=1e-5), (
+        "Model outputs differ after 2-D mesh checkpoint round-trip"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Non-distributed models still work correctly in a multi-rank environment
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.timeout(15)
+@pytest.mark.multigpu_static
+def test_non_distributed_fallback(shared_tmp_dir):
+    """Checkpoint utilities fall back to single-rank behaviour for non-FSDP models."""
+    dm = DistributedManager()
+    device = dm.device
+
+    model = FullyConnected(in_features=8, out_features=8, num_layers=2, layer_size=16).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+    x = torch.randn(2, 8, device=device)
+    loss = model(x).sum()
+    loss.backward()
+    optimizer.step()
+
+    with torch.no_grad():
+        ref = model(x).clone()
+
+    # Only rank 0 saves (non-distributed path)
+    if dm.rank == 0:
+        save_checkpoint(shared_tmp_dir, models=model, optimizer=optimizer, epoch=1)
+    dist.barrier()
+
+    # All ranks load independently (non-distributed path)
+    model2 = FullyConnected(in_features=8, out_features=8, num_layers=2, layer_size=16).to(device)
+    optimizer2 = torch.optim.Adam(model2.parameters(), lr=1e-3)
+    epoch = load_checkpoint(shared_tmp_dir, models=model2, optimizer=optimizer2, device=device)
+    assert epoch == 1
+
+    with torch.no_grad():
+        loaded = model2(x)
+    assert torch.allclose(ref, loaded, rtol=1e-5, atol=1e-5)
+
+
+if __name__ == "__main__":
+    DistributedManager.initialize()
+    test_fsdp_shard_tensor_checkpoint_roundtrip(shared_tmp_dir)
