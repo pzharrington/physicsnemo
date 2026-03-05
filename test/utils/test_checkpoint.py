@@ -30,7 +30,6 @@ from physicsnemo.models.mlp import FullyConnected
 from test.conftest import requires_module
 
 
-
 @pytest.fixture(params=["./checkpoints", "msc://checkpoint-test/checkpoints"])
 def checkpoint_folder(request) -> str:
     return request.param

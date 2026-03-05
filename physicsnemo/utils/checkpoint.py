@@ -49,7 +49,7 @@ from torch.distributed.checkpoint.state_dict import (
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import ShardingStrategy
-from torch.distributed.tensor import DTensor, Replicate, distribute_tensor
+from torch.distributed.tensor import DTensor, distribute_tensor
 from torch.optim.lr_scheduler import LRScheduler
 
 import physicsnemo
@@ -163,22 +163,14 @@ def _has_non_fsdp_dtensors(
 def _redistribute_sd_for_dtensor(
     placements: dict[str, tuple[Any, tuple[Any, ...]]],
     state_dict: dict[str, Any],
-    device_type: str = "cuda",
 ) -> dict[str, Any]:
     """Convert plain tensors in *state_dict* to DTensors matching *placements*.
 
     Entries whose key appears in *placements* are converted via
     ``distribute_tensor`` so that each rank receives its correct local shard.
-    All other entries are left unchanged.
     """
-    if not placements:
-        return state_dict
 
-    # Determine a fallback (Replicate) mesh for keys NOT in placements but
-    # that may still need to be DTensors (e.g. when FSDP use_orig_params=False
-    # promotes all params to DTensor).
-    fallback_mesh = next(iter(placements.values()))[0] if placements else None
-
+    target_device = next(iter(placements.values()))[0].device_type
     out: dict[str, Any] = {}
     for key, value in state_dict.items():
         if not isinstance(value, torch.Tensor) or isinstance(value, DTensor):
@@ -187,20 +179,15 @@ def _redistribute_sd_for_dtensor(
 
         if key in placements:
             mesh, plc = placements[key]
-            out[key] = distribute_tensor(value.to(device_type), mesh, list(plc))
-        elif fallback_mesh is not None:
-            out[key] = distribute_tensor(
-                value.to(device_type), fallback_mesh, [Replicate()]
-            )
+            out[key] = distribute_tensor(value.to(mesh.device_type), mesh, list(plc))
         else:
-            out[key] = value
+            out[key] = value.to(target_device)
     return out
 
 
 def _redistribute_optim_sd_for_dtensor(
     placements: dict[str, tuple[Any, tuple[Any, ...]]],
     optim_sd: dict[str, Any],
-    device_type: str = "cuda",
 ) -> dict[str, Any]:
     """Shard optimizer state tensors to local chunks matching model placements.
 
@@ -210,10 +197,10 @@ def _redistribute_optim_sd_for_dtensor(
     ``distribute_tensor(...).to_local()`` to extract each rank's shard.
     Scalar state entries (e.g. ``step``) are left unchanged.
     """
-    if not placements or "state" not in optim_sd:
+    if "state" not in optim_sd:
         return optim_sd
 
-    fallback_mesh = next(iter(placements.values()))[0] if placements else None
+    target_device = next(iter(placements.values()))[0].device_type
 
     new_state: dict[str, Any] = {}
     for param_name, param_state in optim_sd["state"].items():
@@ -233,17 +220,25 @@ def _redistribute_optim_sd_for_dtensor(
             elif mesh_plc is not None:
                 mesh, plc = mesh_plc
                 new_ps[k] = distribute_tensor(
-                    v.to(device_type), mesh, list(plc)
-                ).to_local()
-            elif fallback_mesh is not None:
-                new_ps[k] = distribute_tensor(
-                    v.to(device_type), fallback_mesh, [Replicate()]
+                    v.to(mesh.device_type), mesh, list(plc)
                 ).to_local()
             else:
-                new_ps[k] = v
+                new_ps[k] = v.to(target_device)
         new_state[param_name] = new_ps
 
     return {**optim_sd, "state": new_state}
+
+
+def _is_mdlus_archive(path: str) -> bool:
+    """Return ``True`` if *path* is a ``.mdlus`` archive (tar or zip containing ``model.pt``)."""
+    cached = _cache_if_needed(path)
+    if tarfile.is_tarfile(cached):
+        with tarfile.open(cached, "r") as tar:
+            return "model.pt" in tar.getnames()
+    if zipfile.is_zipfile(cached):
+        with zipfile.ZipFile(cached, "r") as archive:
+            return "model.pt" in archive.namelist()
+    return False
 
 
 def _extract_mdlus_state_dict(
@@ -831,16 +826,19 @@ def load_model_weights(
         ``"cpu"``.
     """
     model = _unwrap_ddp_compile(model, loading=True)
+    is_mdlus = _is_mdlus_archive(weights_path)
 
     if not _is_distributed_model(model):
         inner = _get_inner_module(model)
-        if isinstance(inner, physicsnemo.core.Module):
+        if is_mdlus and isinstance(inner, physicsnemo.core.Module):
             inner.load(weights_path)
         else:
             cached = _cache_if_needed(weights_path)
-            inner.load_state_dict(
-                torch.load(cached, map_location=device, weights_only=False)
-            )
+            if is_mdlus:
+                sd = _extract_mdlus_state_dict(weights_path, device)
+            else:
+                sd = torch.load(cached, map_location=device, weights_only=False)
+            inner.load_state_dict(sd)
         checkpoint_logging.success(f"Loaded model weights from {weights_path}")
         return
 
@@ -850,8 +848,7 @@ def load_model_weights(
 
     state_dict: dict[str, Any] = {}
     if is_rank0:
-        inner = _get_inner_module(model)
-        if isinstance(inner, physicsnemo.core.Module):
+        if is_mdlus:
             state_dict = _extract_mdlus_state_dict(weights_path, device)
         else:
             cached = _cache_if_needed(weights_path)

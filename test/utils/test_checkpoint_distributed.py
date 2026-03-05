@@ -43,6 +43,7 @@ from torch.distributed.fsdp import (
 from torch.distributed.tensor import DTensor, distribute_module, distribute_tensor
 from torch.distributed.tensor.placement_types import Shard
 
+from physicsnemo import Module
 from physicsnemo.core.version_check import check_version_spec
 from physicsnemo.distributed import DistributedManager
 from physicsnemo.models.mlp import FullyConnected
@@ -163,13 +164,16 @@ def test_fsdp_checkpoint_roundtrip(shared_tmp_dir, use_orig_params, sharding_str
 
 @pytest.mark.timeout(30)
 @pytest.mark.multigpu_static
+@pytest.mark.parametrize("model_type", ["physicsnemo", "pytorch"])
 @pytest.mark.parametrize("use_orig_params", [True, False])
 @pytest.mark.parametrize(
     "sharding_strategy",
     [ShardingStrategy.NO_SHARD, ShardingStrategy.FULL_SHARD],
 )
-def test_load_model_weights_fsdp(shared_tmp_dir, use_orig_params, sharding_strategy):
-    """load_model_weights loads a .mdlus file into an FSDP-wrapped model."""
+def test_load_model_weights_fsdp(
+    shared_tmp_dir, use_orig_params, sharding_strategy, model_type
+):
+    """load_model_weights loads a .mdlus or .pt file into an FSDP-wrapped model."""
     dm = DistributedManager()
     if dm.world_size < 2:
         pytest.skip("Need at least 2 ranks")
@@ -177,9 +181,16 @@ def test_load_model_weights_fsdp(shared_tmp_dir, use_orig_params, sharding_strat
     device = dm.device
     mesh = init_device_mesh("cuda", (dm.world_size,), mesh_dim_names=("world",))
 
-    model = FullyConnected(
-        in_features=16, out_features=16, num_layers=2, layer_size=32
-    ).to(device)
+    if model_type == "physicsnemo":
+        model = FullyConnected(
+            in_features=16, out_features=16, num_layers=2, layer_size=32
+        ).to(device)
+        weights_file = f"{shared_tmp_dir}/trained.mdlus"
+    else:
+        model = nn.Sequential(nn.Linear(16, 32), nn.ReLU(), nn.Linear(32, 16)).to(
+            device
+        )
+        weights_file = f"{shared_tmp_dir}/trained.pt"
 
     # Train a few steps so weights diverge from init
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
@@ -189,19 +200,26 @@ def test_load_model_weights_fsdp(shared_tmp_dir, use_orig_params, sharding_strat
         optimizer.step()
         optimizer.zero_grad()
 
-    # Save the trained weights as a .mdlus file (rank 0 only)
-    weights_file = f"{shared_tmp_dir}/trained.mdlus"
+    # Save trained weights (rank 0 only)
     if dm.rank == 0:
-        model.save(weights_file)
+        if model_type == "physicsnemo":
+            model.save(weights_file)
+        else:
+            torch.save(model.state_dict(), weights_file)
     dist.barrier()
 
     with torch.no_grad():
         ref_output = model(x).clone()
 
     # Build a fresh FSDP-wrapped model and load the weights
-    model2 = FullyConnected(
-        in_features=16, out_features=16, num_layers=2, layer_size=32
-    ).to(device)
+    if model_type == "physicsnemo":
+        model2 = FullyConnected(
+            in_features=16, out_features=16, num_layers=2, layer_size=32
+        ).to(device)
+    else:
+        model2 = nn.Sequential(nn.Linear(16, 32), nn.ReLU(), nn.Linear(32, 16)).to(
+            device
+        )
     fsdp_model2 = FSDP(
         model2,
         device_mesh=mesh["world"],
@@ -225,7 +243,7 @@ def test_load_model_weights_fsdp(shared_tmp_dir, use_orig_params, sharding_strat
 _HAS_TORCH_26 = check_version_spec("torch", "2.6.0", hard_fail=False)
 
 
-class _PosEmbedModel(nn.Module):
+class _PosEmbedModel(Module):
     """Tiny model with a positional-embedding parameter that is selectively sharded."""
 
     def __init__(self, embed_tokens: int = 24, embed_dim: int = 8, hidden: int = 16):
@@ -374,9 +392,12 @@ def test_fsdp_shard_tensor_checkpoint_roundtrip(shared_tmp_dir, use_orig_params)
 @pytest.mark.timeout(60)
 @pytest.mark.multigpu_static
 @pytest.mark.skipif(not _HAS_TORCH_26, reason="ShardTensor requires torch >= 2.6")
+@pytest.mark.parametrize("file_format", ["mdlus", "pt"])
 @pytest.mark.parametrize("use_orig_params", [True, False])
-def test_load_model_weights_fsdp_shard_tensor(shared_tmp_dir, use_orig_params):
-    """load_model_weights loads a .mdlus file into an FSDP+ShardTensor model."""
+def test_load_model_weights_fsdp_shard_tensor(
+    shared_tmp_dir, use_orig_params, file_format
+):
+    """load_model_weights loads a .mdlus or .pt file into an FSDP+ShardTensor model."""
     if use_orig_params:
         pytest.skip(
             "use_orig_params=True + ShardTensor under FSDP NO_SHARD is unsupported: "
@@ -409,10 +430,14 @@ def test_load_model_weights_fsdp_shard_tensor(shared_tmp_dir, use_orig_params):
     with torch.no_grad():
         ref_output = model(x_full).clone()
 
-    # Save the trained weights as a .mdlus file (rank 0 only)
-    weights_file = f"{shared_tmp_dir}/trained_shard.mdlus"
+    # Save trained weights (rank 0 only) using the requested format
+    weights_file = f"{shared_tmp_dir}/trained_shard.{file_format}"
     if dm.rank == 0:
-        torch.save(model.state_dict(), weights_file)
+        if file_format == "mdlus":
+            model.save(weights_file)
+        else:
+            torch.save(model.state_dict(), weights_file)
+
     dist.barrier()
 
     # Build a fresh distributed model and load from the single file
