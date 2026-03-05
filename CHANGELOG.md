@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 ### Dependencies
+- Increments minimum viable PyTorch version to `torch>=2.5.0` to support FSDP better
 
 ## [2.0.0] - 2026-XX-YY
 
