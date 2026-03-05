@@ -48,6 +48,7 @@ from torch.distributed.checkpoint.state_dict import (
     set_optimizer_state_dict,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import ShardingStrategy
 from torch.distributed.tensor import DTensor, Replicate, distribute_tensor
 from torch.optim.lr_scheduler import LRScheduler
 
@@ -63,6 +64,7 @@ checkpoint_logging = PythonLogger("checkpoint")
 # ---------------------------------------------------------------------------
 # Distributed-model detection helpers
 # ---------------------------------------------------------------------------
+
 
 def _is_distributed_model(model: torch.nn.Module) -> bool:
     """Return ``True`` when *model* is FSDP-wrapped or has DTensor params."""
@@ -137,6 +139,27 @@ def _get_dtensor_param_placements(
     return info
 
 
+def _has_non_fsdp_dtensors(
+    model: torch.nn.Module,
+    dtensor_plc: dict[str, tuple[Any, tuple[Any, ...]]],
+) -> bool:
+    """Return ``True`` when *dtensor_plc* contains placements not managed by FSDP.
+
+    FSDP with ``FULL_SHARD`` or ``SHARD_GRAD_OP`` wraps parameters as
+    DTensors on its own mesh.  ``broadcast_from_rank0`` handles these
+    natively, so manual redistribution should be skipped.  Only
+    user-created DTensors (e.g. ShardTensor on a separate domain mesh)
+    require explicit redistribution.
+    """
+    if not dtensor_plc:
+        return False
+    if not isinstance(model, FSDP):
+        return True
+    if model.sharding_strategy == ShardingStrategy.NO_SHARD:
+        return True
+    return False
+
+
 def _redistribute_sd_for_dtensor(
     placements: dict[str, tuple[Any, tuple[Any, ...]]],
     state_dict: dict[str, Any],
@@ -164,9 +187,7 @@ def _redistribute_sd_for_dtensor(
 
         if key in placements:
             mesh, plc = placements[key]
-            out[key] = distribute_tensor(
-                value.to(device_type), mesh, list(plc)
-            )
+            out[key] = distribute_tensor(value.to(device_type), mesh, list(plc))
         elif fallback_mesh is not None:
             out[key] = distribute_tensor(
                 value.to(device_type), fallback_mesh, [Replicate()]
@@ -233,11 +254,15 @@ def _extract_mdlus_state_dict(
     if tarfile.is_tarfile(cached):
         with tarfile.open(cached, "r") as tar:
             f = tar.extractfile("model.pt")
-            return torch.load(io.BytesIO(f.read()), map_location=device, weights_only=False)
+            return torch.load(
+                io.BytesIO(f.read()), map_location=device, weights_only=False
+            )
     elif zipfile.is_zipfile(cached):
         with zipfile.ZipFile(cached, "r") as archive:
             model_bytes = archive.read("model.pt")
-        return torch.load(io.BytesIO(model_bytes), map_location=device, weights_only=False)
+        return torch.load(
+            io.BytesIO(model_bytes), map_location=device, weights_only=False
+        )
     else:
         raise IOError(f"Cannot determine checkpoint format for {file_name}")
 
@@ -477,9 +502,7 @@ def save_checkpoint(
         if not isinstance(models, list):
             models = [models]
         named_models = _unique_model_names(models)
-        is_distributed = any(
-            _is_distributed_model(m) for m in named_models.values()
-        )
+        is_distributed = any(_is_distributed_model(m) for m in named_models.values())
 
     if not DistributedManager.is_initialized():
         checkpoint_logging.warning(
@@ -504,9 +527,7 @@ def save_checkpoint(
     # == Saving model checkpoint ==
     for name, model in named_models.items():
         inner = _get_inner_module(model)
-        model_type = (
-            "mdlus" if isinstance(inner, physicsnemo.core.Module) else "pt"
-        )
+        model_type = "mdlus" if isinstance(inner, physicsnemo.core.Module) else "pt"
         file_name = _get_checkpoint_filename(
             path,
             name,
@@ -528,18 +549,14 @@ def save_checkpoint(
                 else:
                     with fs.open(file_name, "wb") as fp:
                         torch.save(state_dict, fp)
-                checkpoint_logging.success(
-                    f"Saved model state dictionary: {file_name}"
-                )
+                checkpoint_logging.success(f"Saved model state dictionary: {file_name}")
         else:
             if isinstance(inner, physicsnemo.core.Module):
                 inner.save(file_name)
             else:
                 with fs.open(file_name, "wb") as fp:
                     torch.save(model.state_dict(), fp)
-            checkpoint_logging.success(
-                f"Saved model state dictionary: {file_name}"
-            )
+            checkpoint_logging.success(f"Saved model state dictionary: {file_name}")
 
     # == Saving training checkpoint ==
     checkpoint_dict: dict[str, Any] = {}
@@ -569,9 +586,7 @@ def save_checkpoint(
             param_names = pg.get("param_names")
             if param_names is None:
                 continue
-            pg["param_names"] = [
-                pn.removeprefix("_orig_mod.") for pn in param_names
-            ]
+            pg["param_names"] = [pn.removeprefix("_orig_mod.") for pn in param_names]
         checkpoint_dict["optimizer_state_dict"] = opt_state_dict
 
     if scheduler:
@@ -580,9 +595,7 @@ def save_checkpoint(
     if scaler:
         checkpoint_dict["scaler_state_dict"] = scaler.state_dict()
     if _StaticCapture._amp_scalers:
-        checkpoint_dict["static_capture_state_dict"] = (
-            _StaticCapture.state_dict()
-        )
+        checkpoint_dict["static_capture_state_dict"] = _StaticCapture.state_dict()
 
     output_filename = _get_checkpoint_filename(
         path,
@@ -599,9 +612,7 @@ def save_checkpoint(
     if bool(checkpoint_dict) and should_write:
         with fs.open(output_filename, "wb") as fp:
             torch.save(checkpoint_dict, fp)
-        checkpoint_logging.success(
-            f"Saved training checkpoint: {output_filename}"
-        )
+        checkpoint_logging.success(f"Saved training checkpoint: {output_filename}")
 
 
 def load_checkpoint(
@@ -675,9 +686,7 @@ def load_checkpoint(
         if not isinstance(models, list):
             models = [models]
         named_models = _unique_model_names(models, loading=True)
-        is_distributed = any(
-            _is_distributed_model(m) for m in named_models.values()
-        )
+        is_distributed = any(_is_distributed_model(m) for m in named_models.values())
 
     if not DistributedManager.is_initialized():
         checkpoint_logging.warning(
@@ -723,9 +732,7 @@ def load_checkpoint(
     # == Loading model checkpoint ==
     for name, model in named_models.items():
         inner = _get_inner_module(model)
-        model_type = (
-            "mdlus" if isinstance(inner, physicsnemo.core.Module) else "pt"
-        )
+        model_type = "mdlus" if isinstance(inner, physicsnemo.core.Module) else "pt"
         file_name = _get_checkpoint_filename(
             path, name, index=epoch, model_type=model_type
         )
@@ -756,9 +763,7 @@ def load_checkpoint(
         )
 
     # == Loading training checkpoint ==
-    checkpoint_filename = _get_checkpoint_filename(
-        path, index=epoch, model_type="pt"
-    )
+    checkpoint_filename = _get_checkpoint_filename(path, index=epoch, model_type="pt")
     if not fs.exists(checkpoint_filename):
         checkpoint_logging.warning(
             "Could not find valid checkpoint file, skipping load"
@@ -766,9 +771,7 @@ def load_checkpoint(
         return 0
 
     file_to_load = _cache_if_needed(checkpoint_filename)
-    checkpoint_dict = torch.load(
-        file_to_load, map_location=device, weights_only=False
-    )
+    checkpoint_dict = torch.load(file_to_load, map_location=device, weights_only=False)
     checkpoint_logging.success(
         f"Loaded checkpoint file {checkpoint_filename} to device {device}"
     )
@@ -786,9 +789,7 @@ def load_checkpoint(
         checkpoint_logging.success("Loaded grad scaler state dictionary")
 
     if "static_capture_state_dict" in checkpoint_dict:
-        _StaticCapture.load_state_dict(
-            checkpoint_dict["static_capture_state_dict"]
-        )
+        _StaticCapture.load_state_dict(checkpoint_dict["static_capture_state_dict"])
         checkpoint_logging.success("Loaded static capture state dictionary")
 
     loaded_epoch = 0
@@ -801,9 +802,78 @@ def load_checkpoint(
     return loaded_epoch
 
 
+def load_model_weights(
+    model: torch.nn.Module,
+    weights_path: str,
+    device: str | torch.device = "cpu",
+) -> None:
+    r"""Load model weights from a single checkpoint file.
+
+    Loads a ``.mdlus`` (or ``.pt``) file directly into *model*, handling
+    FSDP and DTensor/ShardTensor distribution automatically.  Unlike
+    :func:`load_checkpoint` (which expects a checkpoint *directory* with
+    numbered files), this function accepts a path to a single file.
+
+    When the model is FSDP-wrapped or has DTensor parameters this is a
+    **collective** operation — all ranks must call it.  Rank 0 reads the
+    file and state is scattered via DCP helpers.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        The model to load weights into.  May be FSDP-wrapped, contain
+        DTensor/ShardTensor parameters, or be a plain module.
+    weights_path : str
+        Path to a ``.mdlus`` or ``.pt`` checkpoint file (local path or
+        ``fsspec`` URI).
+    device : str | torch.device, optional
+        Device for :func:`torch.load` ``map_location``.  By default
+        ``"cpu"``.
+    """
+    model = _unwrap_ddp_compile(model, loading=True)
+
+    if not _is_distributed_model(model):
+        inner = _get_inner_module(model)
+        if isinstance(inner, physicsnemo.core.Module):
+            inner.load(weights_path)
+        else:
+            cached = _cache_if_needed(weights_path)
+            inner.load_state_dict(
+                torch.load(cached, map_location=device, weights_only=False)
+            )
+        checkpoint_logging.success(f"Loaded model weights from {weights_path}")
+        return
+
+    if not DistributedManager.is_initialized():
+        DistributedManager.initialize()
+    is_rank0 = DistributedManager().rank == 0
+
+    state_dict: dict[str, Any] = {}
+    if is_rank0:
+        inner = _get_inner_module(model)
+        if isinstance(inner, physicsnemo.core.Module):
+            state_dict = _extract_mdlus_state_dict(weights_path, device)
+        else:
+            cached = _cache_if_needed(weights_path)
+            state_dict = torch.load(cached, map_location=device, weights_only=False)
+
+    dtensor_plc = _get_dtensor_param_placements(model)
+    if _has_non_fsdp_dtensors(model, dtensor_plc):
+        sd_list: list[Any] = [state_dict]
+        torch.distributed.broadcast_object_list(sd_list, src=0)
+        state_dict = _redistribute_sd_for_dtensor(dtensor_plc, sd_list[0])
+        options = StateDictOptions(full_state_dict=True)
+    else:
+        options = StateDictOptions(full_state_dict=True, broadcast_from_rank0=True)
+
+    set_model_state_dict(model, state_dict, options=options)
+    checkpoint_logging.success(f"Loaded model weights from {weights_path}")
+
+
 # ------------------------------------------------------------------
 # Distributed load implementation
 # ------------------------------------------------------------------
+
 
 def _load_checkpoint_distributed(
     *,
@@ -844,11 +914,7 @@ def _load_checkpoint_distributed(
     if is_rank0:
         for name, model in named_models.items():
             inner = _get_inner_module(model)
-            model_type = (
-                "mdlus"
-                if isinstance(inner, physicsnemo.core.Module)
-                else "pt"
-            )
+            model_type = "mdlus" if isinstance(inner, physicsnemo.core.Module) else "pt"
             file_name = _get_checkpoint_filename(
                 path,
                 name,
@@ -890,10 +956,11 @@ def _load_checkpoint_distributed(
             # This is needed because use_orig_params=False flattens DTensor
             # params into a plain FlatParameter, hiding them from inspection.
             dtensor_plc = _get_dtensor_param_placements(model)
-            if dtensor_plc:
-                # broadcast_from_rank0 does not handle DTensor
-                # redistribution, so we broadcast the full state dict
-                # ourselves and convert entries to DTensors.
+            if _has_non_fsdp_dtensors(model, dtensor_plc):
+                # broadcast_from_rank0 does not handle user-managed DTensor
+                # redistribution (e.g. ShardTensor on a domain mesh), so we
+                # broadcast the full state dict ourselves and convert entries
+                # to DTensors.
                 sd_list: list[Any] = [
                     model_state_dicts.get(name, {}) if is_rank0 else {}
                 ]
@@ -901,14 +968,14 @@ def _load_checkpoint_distributed(
                 sd = _redistribute_sd_for_dtensor(dtensor_plc, sd_list[0])
                 set_model_state_dict(model, sd, options=full_options)
             else:
+                # FSDP-managed DTensors (FULL_SHARD/SHARD_GRAD_OP) or no
+                # DTensors at all — broadcast_from_rank0 handles both.
                 sd = model_state_dicts.get(name, {}) if is_rank0 else {}
                 set_model_state_dict(model, sd, options=broadcast_options)
         else:
             # A mix of distributed and non-distributed models is valid
             # (e.g. a main FSDP model alongside a small auxiliary model).
-            sd_list = [
-                model_state_dicts.get(name, {}) if is_rank0 else {}
-            ]
+            sd_list = [model_state_dicts.get(name, {}) if is_rank0 else {}]
             torch.distributed.broadcast_object_list(sd_list, src=0)
             inner = _get_inner_module(model)
             inner.load_state_dict(sd_list[0])
@@ -940,19 +1007,13 @@ def _load_checkpoint_distributed(
             (m for m in named_models.values() if _is_distributed_model(m)),
             None,
         )
-        optim_sd = (
-            checkpoint_dict.get("optimizer_state_dict", {}) if is_rank0 else {}
-        )
+        optim_sd = checkpoint_dict.get("optimizer_state_dict", {}) if is_rank0 else {}
         if opt_model is not None and _is_distributed_model(opt_model):
-            # Reuse model placements if already computed for the same model,
-            # otherwise inspect via collective get_model_state_dict.
             dtensor_plc = _get_dtensor_param_placements(opt_model)
-            if dtensor_plc:
+            if _has_non_fsdp_dtensors(opt_model, dtensor_plc):
                 osd_list: list[Any] = [optim_sd]
                 torch.distributed.broadcast_object_list(osd_list, src=0)
-                optim_sd = _redistribute_optim_sd_for_dtensor(
-                    dtensor_plc, osd_list[0]
-                )
+                optim_sd = _redistribute_optim_sd_for_dtensor(dtensor_plc, osd_list[0])
                 set_optimizer_state_dict(
                     opt_model, optimizer, optim_sd, options=full_options
                 )
@@ -968,11 +1029,7 @@ def _load_checkpoint_distributed(
     # Broadcast remaining training state (scheduler, scaler, epoch, metadata)
     rest: dict[str, Any] = {}
     if is_rank0:
-        rest = {
-            k: v
-            for k, v in checkpoint_dict.items()
-            if k != "optimizer_state_dict"
-        }
+        rest = {k: v for k, v in checkpoint_dict.items() if k != "optimizer_state_dict"}
     rest_list: list[Any] = [rest]
     torch.distributed.broadcast_object_list(rest_list, src=0)
     rest = rest_list[0]

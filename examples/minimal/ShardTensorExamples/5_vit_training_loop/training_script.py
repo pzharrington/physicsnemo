@@ -27,7 +27,7 @@ from physicsnemo.distributed import DistributedManager
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 # Imports for Domain Parallelism
-from physicsnemo.distributed import DistributedManager, scatter_tensor
+from physicsnemo.domain_parallel import scatter_tensor
 from torch.distributed.tensor import distribute_module, distribute_tensor
 
 # FSDP instead of DDP

@@ -27,7 +27,7 @@ from torch.nn.utils import clip_grad_norm_
 import psutil
 from physicsnemo.core import Module
 from physicsnemo.distributed import DistributedManager
-from physicsnemo.utils import load_checkpoint, save_checkpoint
+from physicsnemo.utils import load_checkpoint, load_model_weights, save_checkpoint
 
 from utils.loss import EDMLoss, EDMLossLogUniform
 
@@ -530,7 +530,6 @@ class Trainer:
             if self.cfg.training.resume_checkpoint == "latest"
             else self.cfg.training.resume_checkpoint,
             metadata_dict=metadata_dict,
-            optimizer_model=self.net,
         )
 
         val_loss = metadata_dict.get("val_loss", -1.0)
@@ -540,57 +539,11 @@ class Trainer:
             init_weights = self.cfg.training.initial_weights
             if init_weights is not None:
                 self.logger.info(f"Loading initial weights from {init_weights}...")
-                self._load_initial_weights(init_weights)
+                load_model_weights(self.net, init_weights)
             else:
                 self.logger.info("Starting training from scratch...")
 
         return (total_steps, val_loss)
-
-    def _load_initial_weights(self, weights_path: str) -> None:
-        r"""Load initial weights into the (potentially FSDP-wrapped) model.
-
-        For distributed models the state dict is loaded on rank 0 and
-        scattered to all ranks via DCP ``set_model_state_dict``.
-
-        Parameters
-        ----------
-        weights_path : str
-            Path to a ``.mdlus`` checkpoint file.
-        """
-        from physicsnemo.utils.checkpoint import (
-            _extract_mdlus_state_dict,
-            _get_dtensor_param_placements,
-            _get_inner_module,
-            _is_distributed_model,
-            _redistribute_sd_for_dtensor,
-        )
-
-        if _is_distributed_model(self.net):
-            from torch.distributed.checkpoint.state_dict import (
-                set_model_state_dict,
-                StateDictOptions,
-            )
-
-            state_dict = {}
-            if self.dist.rank == 0:
-                state_dict = _extract_mdlus_state_dict(weights_path)
-
-            dtensor_plc = _get_dtensor_param_placements(self.net)
-            if dtensor_plc:
-                sd_list: list = [state_dict]
-                torch.distributed.broadcast_object_list(sd_list, src=0)
-                state_dict = _redistribute_sd_for_dtensor(
-                    dtensor_plc, sd_list[0]
-                )
-                options = StateDictOptions(full_state_dict=True)
-            else:
-                options = StateDictOptions(
-                    full_state_dict=True, broadcast_from_rank0=True
-                )
-            set_model_state_dict(self.net, state_dict, options=options)
-        else:
-            inner = _get_inner_module(self.net)
-            inner.load(weights_path)
 
     # =========================================================================
     # Training Step
@@ -910,7 +863,6 @@ class Trainer:
             scheduler=self.scheduler,
             epoch=self.total_steps,
             metadata={"val_loss": self.val_loss},
-            optimizer_model=self.net,
         )
 
     # =========================================================================
