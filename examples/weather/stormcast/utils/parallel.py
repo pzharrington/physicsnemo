@@ -246,7 +246,7 @@ class ParallelHelper:
             device_mesh=self.mesh["ddp"],
             use_orig_params=False,  # Required for use with ShardTensor
             sharding_strategy=ShardingStrategy.NO_SHARD,
-            sync_module_states=True, # Ensure initialized weights match across ranks
+            sync_module_states=True,  # Ensure initialized weights match across ranks
             forward_prefetch=True,  # Optimization for faster training
             backward_prefetch=BackwardPrefetch.BACKWARD_PRE,  # Backward prefetching for overlap
         )
