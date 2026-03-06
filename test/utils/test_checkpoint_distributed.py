@@ -75,12 +75,15 @@ def shared_tmp_dir():
 
 @pytest.mark.timeout(30)
 @pytest.mark.multigpu_static
+@pytest.mark.parametrize("sync_module_states", [True, False])
 @pytest.mark.parametrize("use_orig_params", [True, False])
 @pytest.mark.parametrize(
     "sharding_strategy",
     [ShardingStrategy.NO_SHARD, ShardingStrategy.FULL_SHARD],
 )
-def test_fsdp_checkpoint_roundtrip(shared_tmp_dir, use_orig_params, sharding_strategy):
+def test_fsdp_checkpoint_roundtrip(
+    shared_tmp_dir, use_orig_params, sharding_strategy, sync_module_states
+):
     """Save and load a plain FSDP model through the checkpoint utilities."""
     dm = DistributedManager()
     if dm.world_size < 2:
@@ -97,6 +100,7 @@ def test_fsdp_checkpoint_roundtrip(shared_tmp_dir, use_orig_params, sharding_str
         device_mesh=mesh["world"],
         sharding_strategy=sharding_strategy,
         use_orig_params=use_orig_params,
+        sync_module_states=sync_module_states,
     )
     optimizer = torch.optim.Adam(fsdp_model.parameters(), lr=1e-3)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5)
@@ -132,6 +136,7 @@ def test_fsdp_checkpoint_roundtrip(shared_tmp_dir, use_orig_params, sharding_str
         device_mesh=mesh["world"],
         sharding_strategy=sharding_strategy,
         use_orig_params=use_orig_params,
+        sync_module_states=sync_module_states,
     )
     optimizer2 = torch.optim.Adam(fsdp_model2.parameters(), lr=1e-3)
     scheduler2 = torch.optim.lr_scheduler.StepLR(optimizer2, step_size=5)
@@ -164,6 +169,7 @@ def test_fsdp_checkpoint_roundtrip(shared_tmp_dir, use_orig_params, sharding_str
 
 @pytest.mark.timeout(30)
 @pytest.mark.multigpu_static
+@pytest.mark.parametrize("sync_module_states", [True, False])
 @pytest.mark.parametrize("model_type", ["physicsnemo", "pytorch"])
 @pytest.mark.parametrize("use_orig_params", [True, False])
 @pytest.mark.parametrize(
@@ -171,7 +177,7 @@ def test_fsdp_checkpoint_roundtrip(shared_tmp_dir, use_orig_params, sharding_str
     [ShardingStrategy.NO_SHARD, ShardingStrategy.FULL_SHARD],
 )
 def test_load_model_weights_fsdp(
-    shared_tmp_dir, use_orig_params, sharding_strategy, model_type
+    shared_tmp_dir, use_orig_params, sharding_strategy, model_type, sync_module_states
 ):
     """load_model_weights loads a .mdlus or .pt file into an FSDP-wrapped model."""
     dm = DistributedManager()
@@ -225,6 +231,7 @@ def test_load_model_weights_fsdp(
         device_mesh=mesh["world"],
         sharding_strategy=sharding_strategy,
         use_orig_params=use_orig_params,
+        sync_module_states=sync_module_states,
     )
 
     load_model_weights(fsdp_model2, weights_file)
@@ -281,8 +288,11 @@ def _partition_pos_embed(
 @pytest.mark.timeout(60)
 @pytest.mark.multigpu_static
 @pytest.mark.skipif(not _HAS_TORCH_26, reason="ShardTensor requires torch >= 2.6")
+@pytest.mark.parametrize("sync_module_states", [True, False])
 @pytest.mark.parametrize("use_orig_params", [True, False])
-def test_fsdp_shard_tensor_checkpoint_roundtrip(shared_tmp_dir, use_orig_params):
+def test_fsdp_shard_tensor_checkpoint_roundtrip(
+    shared_tmp_dir, use_orig_params, sync_module_states
+):
     """Checkpoint round-trip with a 2-D mesh: FSDP(NO_SHARD) on ddp, ShardTensor on domain."""
     if use_orig_params:
         pytest.skip(
@@ -314,6 +324,7 @@ def test_fsdp_shard_tensor_checkpoint_roundtrip(shared_tmp_dir, use_orig_params)
             device_mesh=mesh["ddp"],
             sharding_strategy=ShardingStrategy.NO_SHARD,
             use_orig_params=use_orig_params,
+            sync_module_states=sync_module_states,
         )
         return m
 
@@ -392,10 +403,11 @@ def test_fsdp_shard_tensor_checkpoint_roundtrip(shared_tmp_dir, use_orig_params)
 @pytest.mark.timeout(60)
 @pytest.mark.multigpu_static
 @pytest.mark.skipif(not _HAS_TORCH_26, reason="ShardTensor requires torch >= 2.6")
+@pytest.mark.parametrize("sync_module_states", [True, False])
 @pytest.mark.parametrize("file_format", ["mdlus", "pt"])
 @pytest.mark.parametrize("use_orig_params", [True, False])
 def test_load_model_weights_fsdp_shard_tensor(
-    shared_tmp_dir, use_orig_params, file_format
+    shared_tmp_dir, use_orig_params, file_format, sync_module_states
 ):
     """load_model_weights loads a .mdlus or .pt file into an FSDP+ShardTensor model."""
     if use_orig_params:
@@ -451,6 +463,7 @@ def test_load_model_weights_fsdp_shard_tensor(
             device_mesh=mesh["ddp"],
             sharding_strategy=ShardingStrategy.NO_SHARD,
             use_orig_params=use_orig_params,
+            sync_module_states=sync_module_states,
         )
         return m
 
@@ -570,7 +583,8 @@ def test_distributed_missing_directory_returns_zero(shared_tmp_dir):
 
 @pytest.mark.timeout(30)
 @pytest.mark.multigpu_static
-def test_fsdp_multiple_models_checkpoint(shared_tmp_dir):
+@pytest.mark.parametrize("sync_module_states", [True, False])
+def test_fsdp_multiple_models_checkpoint(shared_tmp_dir, sync_module_states):
     """Checkpoint round-trip with two separate FSDP-wrapped models."""
     dm = DistributedManager()
     if dm.world_size < 2:
@@ -586,10 +600,16 @@ def test_fsdp_multiple_models_checkpoint(shared_tmp_dir):
         in_features=4, out_features=4, num_layers=2, layer_size=16
     ).to(device)
     fsdp_a = FSDP(
-        model_a, device_mesh=mesh["world"], sharding_strategy=ShardingStrategy.NO_SHARD
+        model_a,
+        device_mesh=mesh["world"],
+        sharding_strategy=ShardingStrategy.NO_SHARD,
+        sync_module_states=sync_module_states,
     )
     fsdp_b = FSDP(
-        model_b, device_mesh=mesh["world"], sharding_strategy=ShardingStrategy.NO_SHARD
+        model_b,
+        device_mesh=mesh["world"],
+        sharding_strategy=ShardingStrategy.NO_SHARD,
+        sync_module_states=sync_module_states,
     )
 
     x_a = torch.randn(2, 8, device=device)
@@ -619,10 +639,16 @@ def test_fsdp_multiple_models_checkpoint(shared_tmp_dir):
         in_features=4, out_features=4, num_layers=2, layer_size=16
     ).to(device)
     fsdp_a2 = FSDP(
-        model_a2, device_mesh=mesh["world"], sharding_strategy=ShardingStrategy.NO_SHARD
+        model_a2,
+        device_mesh=mesh["world"],
+        sharding_strategy=ShardingStrategy.NO_SHARD,
+        sync_module_states=sync_module_states,
     )
     fsdp_b2 = FSDP(
-        model_b2, device_mesh=mesh["world"], sharding_strategy=ShardingStrategy.NO_SHARD
+        model_b2,
+        device_mesh=mesh["world"],
+        sharding_strategy=ShardingStrategy.NO_SHARD,
+        sync_module_states=sync_module_states,
     )
 
     epoch = load_checkpoint(shared_tmp_dir, models=[fsdp_a2, fsdp_b2])
@@ -646,8 +672,11 @@ def test_fsdp_multiple_models_checkpoint(shared_tmp_dir):
 
 @pytest.mark.timeout(30)
 @pytest.mark.multigpu_static
+@pytest.mark.parametrize("sync_module_states", [True, False])
 @pytest.mark.parametrize("use_orig_params", [True, False])
-def test_fsdp_pytorch_module_checkpoint_roundtrip(shared_tmp_dir, use_orig_params):
+def test_fsdp_pytorch_module_checkpoint_roundtrip(
+    shared_tmp_dir, use_orig_params, sync_module_states
+):
     """Checkpoint round-trip for a plain nn.Module (not physicsnemo.Module) under FSDP."""
     dm = DistributedManager()
     if dm.world_size < 2:
@@ -662,6 +691,7 @@ def test_fsdp_pytorch_module_checkpoint_roundtrip(shared_tmp_dir, use_orig_param
         device_mesh=mesh["world"],
         sharding_strategy=ShardingStrategy.FULL_SHARD,
         use_orig_params=use_orig_params,
+        sync_module_states=sync_module_states,
     )
     optimizer = torch.optim.Adam(fsdp_model.parameters(), lr=1e-3)
 
@@ -689,6 +719,7 @@ def test_fsdp_pytorch_module_checkpoint_roundtrip(shared_tmp_dir, use_orig_param
         device_mesh=mesh["world"],
         sharding_strategy=ShardingStrategy.FULL_SHARD,
         use_orig_params=use_orig_params,
+        sync_module_states=sync_module_states,
     )
     optimizer2 = torch.optim.Adam(fsdp_model2.parameters(), lr=1e-3)
 
@@ -714,7 +745,8 @@ def test_fsdp_pytorch_module_checkpoint_roundtrip(shared_tmp_dir, use_orig_param
 
 @pytest.mark.timeout(30)
 @pytest.mark.multigpu_static
-def test_fsdp_grad_scaler_checkpoint(shared_tmp_dir):
+@pytest.mark.parametrize("sync_module_states", [True, False])
+def test_fsdp_grad_scaler_checkpoint(shared_tmp_dir, sync_module_states):
     """Checkpoint round-trip preserves GradScaler state under FSDP."""
     dm = DistributedManager()
     if dm.world_size < 2:
@@ -727,7 +759,10 @@ def test_fsdp_grad_scaler_checkpoint(shared_tmp_dir):
         in_features=16, out_features=16, num_layers=2, layer_size=32
     ).to(device)
     fsdp_model = FSDP(
-        model, device_mesh=mesh["world"], sharding_strategy=ShardingStrategy.NO_SHARD
+        model,
+        device_mesh=mesh["world"],
+        sharding_strategy=ShardingStrategy.NO_SHARD,
+        sync_module_states=sync_module_states,
     )
     optimizer = torch.optim.Adam(fsdp_model.parameters(), lr=1e-3)
     scaler = torch.amp.GradScaler("cuda")
@@ -757,7 +792,10 @@ def test_fsdp_grad_scaler_checkpoint(shared_tmp_dir):
         in_features=16, out_features=16, num_layers=2, layer_size=32
     ).to(device)
     fsdp_model2 = FSDP(
-        model2, device_mesh=mesh["world"], sharding_strategy=ShardingStrategy.NO_SHARD
+        model2,
+        device_mesh=mesh["world"],
+        sharding_strategy=ShardingStrategy.NO_SHARD,
+        sync_module_states=sync_module_states,
     )
     optimizer2 = torch.optim.Adam(fsdp_model2.parameters(), lr=1e-3)
     scaler2 = torch.amp.GradScaler("cuda")

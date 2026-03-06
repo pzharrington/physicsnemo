@@ -275,6 +275,7 @@ def test_checkpoint_integrity(
     cfg_diffusion.training.domain_parallel_size = 2
     cfg_diffusion.training.batch_size = 2
     cfg_diffusion.training.rundir = _setup_rundir(tmp_path, dist.world_size)
+    cfg_diffusion.training.seed = 0
 
     # create trainer, train a bit and save checkpoint
     t0 = trainer.Trainer(cfg_diffusion.copy())

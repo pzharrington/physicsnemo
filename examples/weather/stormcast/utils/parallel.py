@@ -244,9 +244,9 @@ class ParallelHelper:
         return FSDP(
             model,
             device_mesh=self.mesh["ddp"],
-            use_orig_params=False,  # Set to True if you want to see individual params
+            use_orig_params=False,  # Required for use with ShardTensor
             sharding_strategy=ShardingStrategy.NO_SHARD,
-            sync_module_states=False,  # load after sharding
+            sync_module_states=True, # Ensure initialized weights match across ranks
             forward_prefetch=True,  # Optimization for faster training
             backward_prefetch=BackwardPrefetch.BACKWARD_PRE,  # Backward prefetching for overlap
         )

@@ -189,7 +189,7 @@ def main():
             if args.ddp_size > 1:
                 # This step goes in the other axis on the mesh: every rank "i" of
                 # each domain will sync up here.
-                model = FSDP(model, device_mesh=ddp_mesh, use_orig_params=False)
+                model = FSDP(model, device_mesh=ddp_mesh, use_orig_params=False, sync_module_states=True)
 
         results.append(
             end_to_end_benchmark(
