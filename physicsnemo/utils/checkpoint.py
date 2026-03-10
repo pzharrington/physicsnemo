@@ -546,12 +546,13 @@ def save_checkpoint(
                         torch.save(state_dict, fp)
                 checkpoint_logging.success(f"Saved model state dictionary: {file_name}")
         else:
-            if isinstance(inner, physicsnemo.core.Module):
-                inner.save(file_name)
-            else:
-                with fs.open(file_name, "wb") as fp:
-                    torch.save(model.state_dict(), fp)
-            checkpoint_logging.success(f"Saved model state dictionary: {file_name}")
+            if should_write:
+                if isinstance(inner, physicsnemo.core.Module):
+                    inner.save(file_name)
+                else:
+                    with fs.open(file_name, "wb") as fp:
+                        torch.save(model.state_dict(), fp)
+                checkpoint_logging.success(f"Saved model state dictionary: {file_name}")
 
     # == Saving training checkpoint ==
     checkpoint_dict: dict[str, Any] = {}
