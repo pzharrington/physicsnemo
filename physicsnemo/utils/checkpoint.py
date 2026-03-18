@@ -54,6 +54,7 @@ from torch.optim.lr_scheduler import LRScheduler
 
 import physicsnemo
 from physicsnemo.core.filesystem import LOCAL_CACHE, _download_cached
+from physicsnemo.core.module import Module
 from physicsnemo.distributed import DistributedManager
 from physicsnemo.utils.capture import _StaticCapture
 from physicsnemo.utils.logging import PythonLogger
@@ -92,14 +93,7 @@ def _unwrap_ddp_compile(
     return model
 
 
-def _get_model_class_name(model: torch.nn.Module) -> str:
-    """Return the class name of the innermost module (looking through FSDP)."""
-    if isinstance(model, FSDP):
-        return type(model.module).__name__
-    return type(model).__name__
-
-
-def _get_inner_module(model: torch.nn.Module) -> torch.nn.Module:
+def _unwrap_fsdp(model: torch.nn.Module) -> torch.nn.Module:
     """Unwrap one FSDP layer (if present) to reach the user module."""
     if isinstance(model, FSDP):
         return model.module
@@ -246,20 +240,20 @@ def _extract_mdlus_state_dict(
 ) -> dict[str, Any]:
     """Read only the ``state_dict`` from a ``.mdlus`` archive."""
     cached = _cache_if_needed(file_name)
-    if tarfile.is_tarfile(cached):
+    fmt = Module._detect_checkpoint_format(cached)
+
+    if fmt == "tar":
         with tarfile.open(cached, "r") as tar:
             f = tar.extractfile("model.pt")
             return torch.load(
                 io.BytesIO(f.read()), map_location=device, weights_only=False
             )
-    elif zipfile.is_zipfile(cached):
+    else:
         with zipfile.ZipFile(cached, "r") as archive:
             model_bytes = archive.read("model.pt")
         return torch.load(
             io.BytesIO(model_bytes), map_location=device, weights_only=False
         )
-    else:
-        raise IOError(f"Cannot determine checkpoint format for {file_name}")
 
 
 def _get_checkpoint_filename(
@@ -407,7 +401,7 @@ def _unique_model_names(
     model_dict: dict[str, list[torch.nn.Module]] = {}
     for model0 in models:
         model0 = _unwrap_ddp_compile(model0, loading=loading)
-        base_name = _get_model_class_name(model0)
+        base_name = type(_unwrap_fsdp(model0)).__name__
         if base_name in model_dict:
             model_dict[base_name].append(model0)
         else:
@@ -481,10 +475,12 @@ def save_checkpoint(
         Arbitrary key-value pairs persisted alongside the training state
         (e.g. best validation loss, MLflow run ID).
     optimizer_model : torch.nn.Module | None, optional
-        The model whose parameters the ``optimizer`` is tracking.
-        Required by the DCP ``get_optimizer_state_dict`` helper when
-        distributed mode is active.  When ``None``, the first model in
-        ``models`` is used.  Ignored when *not* in distributed mode.
+        The model whose parameters the ``optimizer`` is tracking so that
+        parameter unsharding of optimizer state can be performed correctly.
+        Only required when multiple models are provided, and at least one of
+        them is a distributed model (FSDP/ShardTensor). When ``None``, the
+        first model in ``models`` is used.  Ignored when *not* in distributed
+        mode.
 
     Examples
     --------
@@ -547,7 +543,7 @@ def save_checkpoint(
 
     # == Saving model checkpoint ==
     for name, model in named_models.items():
-        inner = _get_inner_module(model)
+        inner = _unwrap_fsdp(model)
         model_type = "mdlus" if isinstance(inner, physicsnemo.core.Module) else "pt"
         file_name = _get_checkpoint_filename(
             path,
@@ -566,7 +562,7 @@ def save_checkpoint(
             if should_write:
                 state_dict = _cpu_offload_state_dict(state_dict)
                 if isinstance(inner, physicsnemo.core.Module):
-                    inner.save(file_name, state_dict=state_dict)
+                    inner.save(file_name, _state_dict=state_dict)
                 else:
                     with fs.open(file_name, "wb") as fp:
                         torch.save(state_dict, fp)
@@ -786,7 +782,7 @@ def load_checkpoint(
 
     # == Loading model checkpoint ==
     for name, model in named_models.items():
-        inner = _get_inner_module(model)
+        inner = _unwrap_fsdp(model)
         model_type = "mdlus" if isinstance(inner, physicsnemo.core.Module) else "pt"
         file_name = _get_checkpoint_filename(
             path, name, index=epoch, model_type=model_type
@@ -889,7 +885,7 @@ def load_model_weights(
     is_mdlus = _is_mdlus_archive(weights_path)
 
     if not _is_distributed_model(model):
-        inner = _get_inner_module(model)
+        inner = _unwrap_fsdp(model)
         if is_mdlus and isinstance(inner, physicsnemo.core.Module):
             inner.load(weights_path)
         else:
@@ -970,7 +966,7 @@ def _load_checkpoint_distributed(
     model_state_dicts: dict[str, dict[str, Any]] = {}
     if is_rank0:
         for name, model in named_models.items():
-            inner = _get_inner_module(model)
+            inner = _unwrap_fsdp(model)
             model_type = "mdlus" if isinstance(inner, physicsnemo.core.Module) else "pt"
             file_name = _get_checkpoint_filename(
                 path,
@@ -1034,7 +1030,7 @@ def _load_checkpoint_distributed(
             # (e.g. a main FSDP model alongside a small auxiliary model).
             sd_list = [model_state_dicts.get(name, {}) if is_rank0 else {}]
             torch.distributed.broadcast_object_list(sd_list, src=0)
-            inner = _get_inner_module(model)
+            inner = _unwrap_fsdp(model)
             inner.load_state_dict(sd_list[0])
 
         file_name = model_file_info[name]
