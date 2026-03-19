@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adds adjacency caching to PhysicsNeMo-Mesh `Mesh` objects, allowing efficient
   reuse of neighbor information.
 - Added support for 1D, 2D, and 3D neighborhood attention (natten) via
-  `physicsnemo.nn.functinonal` interface, with full `ShardTensor` support.
+  `physicsnemo.nn.functional` interface, with full `ShardTensor` support.
 
 ### Changed
 

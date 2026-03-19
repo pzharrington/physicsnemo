@@ -21,6 +21,7 @@ from typing import Any, Callable
 import torch
 from torch.distributed.tensor.placement_types import Shard
 
+from physicsnemo.core.version_check import OptionalImport
 from physicsnemo.domain_parallel import ShardTensor
 from physicsnemo.domain_parallel.shard_utils.halo import (
     HaloConfig,
@@ -32,6 +33,13 @@ from physicsnemo.domain_parallel.shard_utils.patch_core import (
     UndeterminedShardingError,
 )
 from physicsnemo.nn.functional.natten import na1d, na2d, na3d
+
+_natten = OptionalImport("natten")
+_raw_func_map = {
+    na1d: lambda: _natten.functional.na1d,
+    na2d: lambda: _natten.functional.na2d,
+    na3d: lambda: _natten.functional.na3d,
+}
 
 __all__ = ["na1d_wrapper", "na2d_wrapper", "na3d_wrapper"]
 
@@ -232,17 +240,16 @@ def _natten_wrapper(
     q, k, v, kernel_size = args[0], args[1], args[2], args[3]
 
     dilation = kwargs.get("dilation", 1)
-    natten_kwargs = {
-        _k: _v for _k, _v in kwargs.items() if _k not in ("kernel_size", "dilation")
-    }
+    natten_kwargs = {_k: _v for _k, _v in kwargs.items() if _k != "dilation"}
 
-    if all(isinstance(_t, ShardTensor) for _t in (q, k, v)):
-        return _partial_natten(
-            q, k, v, kernel_size, dilation, base_func=func, **natten_kwargs
-        )
-    elif all(isinstance(_t, torch.Tensor) for _t in (q, k, v)):
+    if all(type(_t) is torch.Tensor for _t in (q, k, v)):
         return func(
             q, k, v, kernel_size=kernel_size, dilation=dilation, **natten_kwargs
+        )
+    elif all(isinstance(_t, ShardTensor) for _t in (q, k, v)):
+        raw_func = _raw_func_map[func]()
+        return _partial_natten(
+            q, k, v, kernel_size, dilation, base_func=raw_func, **natten_kwargs
         )
     else:
         raise UndeterminedShardingError(
