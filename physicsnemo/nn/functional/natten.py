@@ -73,9 +73,7 @@ def na1d(
             dilation=dilation,
             **kwargs,
         )
-    return _natten.functional.na1d(
-        q, k, v, kernel_size, dilation=dilation, **kwargs
-    )
+    return _natten.functional.na1d(q, k, v, kernel_size, dilation=dilation, **kwargs)
 
 
 def na2d(
@@ -125,9 +123,7 @@ def na2d(
             dilation=dilation,
             **kwargs,
         )
-    return _natten.functional.na2d(
-        q, k, v, kernel_size, dilation=dilation, **kwargs
-    )
+    return _natten.functional.na2d(q, k, v, kernel_size, dilation=dilation, **kwargs)
 
 
 def na3d(
@@ -177,9 +173,7 @@ def na3d(
             dilation=dilation,
             **kwargs,
         )
-    return _natten.functional.na3d(
-        q, k, v, kernel_size, dilation=dilation, **kwargs
-    )
+    return _natten.functional.na3d(q, k, v, kernel_size, dilation=dilation, **kwargs)
 
 
 __all__ = ["na1d", "na2d", "na3d"]

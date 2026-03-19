@@ -458,9 +458,7 @@ class Natten2DSelfAttention(AttentionModuleBase):
             lambda x: rearrange(x, "b head (h w) c -> b h w head c", h=h),
             [q, k, v],
         )
-        x = _na2d_func(
-            q, k, v, kernel_size=self.attn_kernel, **self.na2d_kwargs
-        )
+        x = _na2d_func(q, k, v, kernel_size=self.attn_kernel, **self.na2d_kwargs)
         x = self.attn_drop(x)
         x = rearrange(x, "b h w head c -> b (h w) (head c)")
 

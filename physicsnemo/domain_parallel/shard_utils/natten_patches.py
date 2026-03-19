@@ -33,7 +33,6 @@ from physicsnemo.domain_parallel.shard_utils.patch_core import (
 )
 from physicsnemo.nn.functional.natten import na1d, na2d, na3d
 
-
 __all__ = ["na1d_wrapper", "na2d_wrapper", "na3d_wrapper"]
 
 
@@ -182,7 +181,9 @@ def _partial_natten(
         lk = halo_padding(lk, k._spec.mesh, halo_config)
         lv = halo_padding(lv, v._spec.mesh, halo_config)
 
-    x = base_func(lq, lk, lv, kernel_size=kernel_size, dilation=dilation, **natten_kwargs)
+    x = base_func(
+        lq, lk, lv, kernel_size=kernel_size, dilation=dilation, **natten_kwargs
+    )
 
     for halo_config in halo_configs:
         x = unhalo_padding(x, q._spec.mesh, halo_config)
@@ -232,9 +233,7 @@ def _natten_wrapper(
 
     dilation = kwargs.get("dilation", 1)
     natten_kwargs = {
-        _k: _v
-        for _k, _v in kwargs.items()
-        if _k not in ("kernel_size", "dilation")
+        _k: _v for _k, _v in kwargs.items() if _k not in ("kernel_size", "dilation")
     }
 
     if all(isinstance(_t, ShardTensor) for _t in (q, k, v)):
@@ -242,7 +241,9 @@ def _natten_wrapper(
             q, k, v, kernel_size, dilation, base_func=func, **natten_kwargs
         )
     elif all(isinstance(_t, torch.Tensor) for _t in (q, k, v)):
-        return func(q, k, v, kernel_size=kernel_size, dilation=dilation, **natten_kwargs)
+        return func(
+            q, k, v, kernel_size=kernel_size, dilation=dilation, **natten_kwargs
+        )
     else:
         raise UndeterminedShardingError(
             "q, k, and v must all be the same types (torch.Tensor or ShardTensor)"
