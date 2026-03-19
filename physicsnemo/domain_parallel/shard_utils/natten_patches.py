@@ -31,10 +31,10 @@ from physicsnemo.domain_parallel.shard_utils.patch_core import (
     MissingShardPatch,
     UndeterminedShardingError,
 )
-from physicsnemo.nn.functional.na2d import na2d
+from physicsnemo.nn.functional.natten import na1d, na2d, na3d
 
 
-__all__ = ["na2d_wrapper"]
+__all__ = ["na1d_wrapper", "na2d_wrapper", "na3d_wrapper"]
 
 
 def compute_halo_from_kernel_and_dilation(kernel_size: int, dilation: int) -> int:
@@ -128,14 +128,14 @@ def compute_halo_configs_from_natten_args(
     return halo_configs
 
 
-def _partial_na2d(
+def _partial_natten(
     q: ShardTensor,
     k: ShardTensor,
     v: ShardTensor,
     kernel_size: int,
     dilation: int,
     base_func: Callable,
-    **na2d_kwargs: Any,
+    **natten_kwargs: Any,
 ) -> ShardTensor:
     r"""Compute neighborhood attention on a sharded tensor with halo exchange.
 
@@ -159,8 +159,8 @@ def _partial_na2d(
         Dilation factor for attention kernel.
     base_func : Callable
         The base neighborhood attention function to call with padded tensors. Called as
-        ``base_func(lq, lk, lv, kernel_size=kernel_size, dilation=dilation, **na2d_kwargs)``.
-    **na2d_kwargs : Any
+        ``base_func(lq, lk, lv, kernel_size=kernel_size, dilation=dilation, **natten_kwargs)``.
+    **natten_kwargs : Any
         Additional keyword arguments passed through to ``base_func`` (e.g. ``is_causal``, ``scale``, ``stride``).
 
     Returns
@@ -182,7 +182,7 @@ def _partial_na2d(
         lk = halo_padding(lk, k._spec.mesh, halo_config)
         lv = halo_padding(lv, v._spec.mesh, halo_config)
 
-    x = base_func(lq, lk, lv, kernel_size=kernel_size, dilation=dilation, **na2d_kwargs)
+    x = base_func(lq, lk, lv, kernel_size=kernel_size, dilation=dilation, **natten_kwargs)
 
     for halo_config in halo_configs:
         x = unhalo_padding(x, q._spec.mesh, halo_config)
@@ -193,28 +193,30 @@ def _partial_na2d(
     return x
 
 
-def na2d_wrapper(
+def _natten_wrapper(
     func: Callable,
     types: tuple[Any, ...],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> torch.Tensor | ShardTensor:
-    r"""Wrapper for :func:`physicsnemo.nn.functional.na2d` to support sharded tensors.
+    r"""Shared wrapper for natten functions to support sharded tensors.
 
     Registered with :meth:`ShardTensor.register_function_handler` so that calls
-    to :func:`~physicsnemo.nn.functional.na2d` automatically route through this
-    handler when any argument is a :class:`ShardTensor`.
+    to :func:`~physicsnemo.nn.functional.natten.na1d`,
+    :func:`~physicsnemo.nn.functional.natten.na2d`, or
+    :func:`~physicsnemo.nn.functional.natten.na3d` automatically route through
+    this handler when any argument is a :class:`ShardTensor`.
 
     Parameters
     ----------
     func : Callable
-        The wrapped na2d function (passed by ``__torch_function__``).
+        The wrapped natten function (passed by ``__torch_function__``).
     types : tuple[Any, ...]
         The types of the inputs (unused).
     args : tuple[Any, ...]
-        Positional arguments containing query, key, value tensors.
+        Positional arguments containing query, key, value tensors and kernel_size.
     kwargs : dict[str, Any]
-        Keyword arguments including ``kernel_size`` and ``dilation``.
+        Keyword arguments including ``dilation``.
 
     Returns
     -------
@@ -229,22 +231,29 @@ def na2d_wrapper(
     q, k, v, kernel_size = args[0], args[1], args[2], args[3]
 
     dilation = kwargs.get("dilation", 1)
-    na2d_kwargs = {
+    natten_kwargs = {
         _k: _v
         for _k, _v in kwargs.items()
         if _k not in ("kernel_size", "dilation")
     }
 
     if all(isinstance(_t, ShardTensor) for _t in (q, k, v)):
-        return _partial_na2d(
-            q, k, v, kernel_size, dilation, base_func=func, **na2d_kwargs
+        return _partial_natten(
+            q, k, v, kernel_size, dilation, base_func=func, **natten_kwargs
         )
     elif all(isinstance(_t, torch.Tensor) for _t in (q, k, v)):
-        return func(q, k, v, kernel_size=kernel_size, dilation=dilation, **na2d_kwargs)
+        return func(q, k, v, kernel_size=kernel_size, dilation=dilation, **natten_kwargs)
     else:
         raise UndeterminedShardingError(
             "q, k, and v must all be the same types (torch.Tensor or ShardTensor)"
         )
 
 
+# Public aliases for explicit registration
+na1d_wrapper = _natten_wrapper
+na2d_wrapper = _natten_wrapper
+na3d_wrapper = _natten_wrapper
+
+ShardTensor.register_function_handler(na1d, na1d_wrapper)
 ShardTensor.register_function_handler(na2d, na2d_wrapper)
+ShardTensor.register_function_handler(na3d, na3d_wrapper)
