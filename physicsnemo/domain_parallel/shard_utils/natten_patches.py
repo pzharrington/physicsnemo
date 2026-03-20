@@ -69,6 +69,7 @@ def compute_halo_from_kernel_and_dilation(kernel_size: int, dilation: int) -> in
         - Even kernel sizes not supported
         - Dilation != 1 not supported
     """
+    # Currently, reject even kernel_sizes and dilation != 1:
     if kernel_size % 2 == 0:
         raise MissingShardPatch(
             "Neighborhood Attention is not implemented for even kernels"
@@ -119,9 +120,11 @@ def compute_halo_configs_from_natten_args(
         ]:  # Skip batch dim
             continue
 
+        # Compute required halo size from kernel parameters
         halo_size = compute_halo_from_kernel_and_dilation(kernel_size, dilation)
 
         if halo_size > 0:
+            # Create a halo config for this dimension
             halo_configs.append(
                 HaloConfig(
                     mesh_dim=mesh_dim,
@@ -180,22 +183,29 @@ def _partial_natten(
     MissingShardPatch
         If kernel configuration is not supported for sharding.
     """
+    # First, get the tensors locally and perform halos:
     lq, lk, lv = q.to_local(), k.to_local(), v.to_local()
 
+    # Compute halo configs for these tensors.  We can assume
+    # the halo configs are the same for q/k/v and just do it once:
     halo_configs = compute_halo_configs_from_natten_args(q, kernel_size, dilation)
 
+    # Apply the halo padding to the input tensors
     for halo_config in halo_configs:
         lq = halo_padding(lq, q._spec.mesh, halo_config)
         lk = halo_padding(lk, k._spec.mesh, halo_config)
         lv = halo_padding(lv, v._spec.mesh, halo_config)
 
+    # Apply native na2d operation (dilation explicit; other options via natten_kwargs)
     x = base_func(
         lq, lk, lv, kernel_size=kernel_size, dilation=dilation, **natten_kwargs
     )
 
+    # Remove halos and convert back to ShardTensor
     for halo_config in halo_configs:
         x = unhalo_padding(x, q._spec.mesh, halo_config)
 
+    # Convert back to ShardTensor
     x = ShardTensor.from_local(
         x, q._spec.mesh, q._spec.placements, q._spec.sharding_shapes()
     )
