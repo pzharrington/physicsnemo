@@ -693,7 +693,7 @@ class DiTBlock(nn.Module):
         self,
         x: Float[torch.Tensor, "batch sequence hidden_size"],
         c: Float[torch.Tensor, "batch condition_embed_dim"],
-        attn_kwargs: Dict[str, Any] = {},
+        attn_kwargs: Optional[Dict[str, Any]] = None,
         p_dropout: Optional[float | Float[torch.Tensor, " batch"]] = None,
     ) -> Float[torch.Tensor, "batch sequence hidden_size"]:
         (
@@ -720,7 +720,7 @@ class DiTBlock(nn.Module):
 
         attention_output = self.attention(
             modulated_attn_input,
-            **attn_kwargs,
+            **(attn_kwargs or {}),
         )
         x = torch.addcmul(
             x, self.drop_path(attention_gate.unsqueeze(1)), attention_output

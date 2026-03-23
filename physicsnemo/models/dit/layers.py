@@ -24,12 +24,14 @@
 
 import warnings
 
+from physicsnemo.core.warnings import LegacyFeatureWarning
+
 warnings.warn(
     "physicsnemo.models.dit.layers is deprecated. "
     "Import DiT layer components from physicsnemo.nn instead "
     "(e.g. `from physicsnemo.nn import DiTBlock`). "
     "This backward-compatibility shim will be removed in a future release.",
-    DeprecationWarning,
+    LegacyFeatureWarning,
     stacklevel=2,
 )
 

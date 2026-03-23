@@ -28,7 +28,9 @@ Importing these names from ``physicsnemo.models.dit`` is deprecated and will be 
 in a future release.
 """
 
-import warnings as _warnings
+import warnings as warnings
+
+from physicsnemo.core.warnings import LegacyFeatureWarning
 
 from .dit import DiT
 
@@ -63,11 +65,11 @@ def __getattr__(name):
     if name in __DEPRECATED_NAMES:
         import physicsnemo.nn as _nn
 
-        _warnings.warn(
+        warnings.warn(
             f"Importing '{name}' from 'physicsnemo.models.dit' is deprecated. "
             f"Use 'from physicsnemo.nn import {name}' instead. "
             "This backward-compatibility shim will be removed in a future release.",
-            DeprecationWarning,
+            LegacyFeatureWarning,
             stacklevel=2,
         )
         return getattr(_nn, name)

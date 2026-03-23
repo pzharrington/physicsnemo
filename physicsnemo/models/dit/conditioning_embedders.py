@@ -24,12 +24,14 @@
 
 import warnings
 
+from physicsnemo.core.warnings import LegacyFeatureWarning
+
 warnings.warn(
     "physicsnemo.models.dit.conditioning_embedders is deprecated. "
     "Import conditioning embedder components from physicsnemo.nn instead "
     "(e.g. `from physicsnemo.nn import ConditioningEmbedder`). "
     "This backward-compatibility shim will be removed in a future release.",
-    DeprecationWarning,
+    LegacyFeatureWarning,
     stacklevel=2,
 )
 
