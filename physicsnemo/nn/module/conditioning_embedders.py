@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Conditioning embedders for DiT models."""
+"""Conditioning embedders for diffusion transformer models."""
 
 import math
 from enum import Enum
@@ -25,7 +25,8 @@ import torch.nn as nn
 from jaxtyping import Float
 
 from physicsnemo.core import Module
-from physicsnemo.nn import Linear, PositionalEmbedding
+from physicsnemo.nn.module.embedding_layers import PositionalEmbedding
+from physicsnemo.nn.module.fully_connected_layers import Linear
 
 
 @runtime_checkable
@@ -279,7 +280,7 @@ class EDMConditionEmbedder(Module):
 class ConditioningEmbedderType(Enum):
     r"""Conditioning embedder types for DiT models.
 
-    Used by :func:`~physicsnemo.models.dit.conditioning_embedders.get_conditioning_embedder`
+    Used by :func:`~physicsnemo.nn.module.conditioning_embedders.get_conditioning_embedder`
     to select the conditioning embedder implementation.
     """
 
@@ -304,13 +305,13 @@ def get_conditioning_embedder(
             - ZERO: Returns empty (B, 0) tensors for bias-only AdaLN (unconditional/ViT-style inference).
     **kwargs
         Keyword arguments passed to the embedder constructor.
-        See :class:`~physicsnemo.models.dit.conditioning_embedders.DiTConditionEmbedder` or
-        :class:`~physicsnemo.models.dit.conditioning_embedders.EDMConditionEmbedder` for available options.
+        See :class:`~physicsnemo.nn.module.conditioning_embedders.DiTConditionEmbedder` or
+        :class:`~physicsnemo.nn.module.conditioning_embedders.EDMConditionEmbedder` for available options.
 
     Returns
     -------
     ConditioningEmbedder
-        An instance implementing the :class:`~physicsnemo.models.dit.conditioning_embedders.ConditioningEmbedder` protocol.
+        An instance implementing the :class:`~physicsnemo.nn.module.conditioning_embedders.ConditioningEmbedder` protocol.
     """
     if conditioning_embedder == ConditioningEmbedderType.ZERO:
         return conditioning_embedder.value()

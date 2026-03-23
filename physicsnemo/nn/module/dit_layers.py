@@ -27,7 +27,8 @@ from timm.layers import RmsNorm
 
 from physicsnemo.core import Module
 from physicsnemo.core.version_check import OptionalImport, check_version_spec
-from physicsnemo.nn import DropPath, Mlp
+from physicsnemo.nn.module.drop import DropPath
+from physicsnemo.nn.module.mlp_layers import Mlp
 from physicsnemo.nn.functional.natten import na2d as _na2d_func
 from physicsnemo.nn.module.hpx.tokenizer import (
     HEALPixPatchDetokenizer,
@@ -362,7 +363,7 @@ class Natten2DSelfAttention(AttentionModuleBase):
     proj_drop_rate : float, optional, default=0.0
         The dropout rate for the output projection.
     norm_layer : Literal["apex", "torch"], optional, default="torch"
-        The layer normalization backend for QK norm when ``qk_norm=True``. When used inside :class:`~physicsnemo.models.dit.layers.DiTBlock` with ``attention_backend="natten2d"``, this is set from the block's ``layernorm_backend``.
+        The layer normalization backend for QK norm when ``qk_norm=True``. When used inside :class:`~physicsnemo.nn.module.dit_layers.DiTBlock` with ``attention_backend="natten2d"``, this is set from the block's ``layernorm_backend``.
     na2d_kwargs : Dict[str, Any], optional, default=None
         Optional keyword arguments forwarded to :func:`physicsnemo.nn.functional.na2d` for performance tuning (e.g. ``dilation``, ``is_causal``, ``scale``). If ``None``, an empty dict is used.
 
@@ -386,7 +387,7 @@ class Natten2DSelfAttention(AttentionModuleBase):
     Examples
     --------
     >>> import torch
-    >>> from physicsnemo.models.dit.layers import Natten2DSelfAttention
+    >>> from physicsnemo.nn.module.dit_layers import Natten2DSelfAttention
     >>> attn = Natten2DSelfAttention(hidden_size=64, num_heads=4, attn_kernel=3)
     >>> x = torch.randn(2, 16, 64)
     >>> out = attn(x, latent_hw=(4, 4))
@@ -549,10 +550,10 @@ class DiTBlock(nn.Module):
     attention_backend : Literal["timm", "transformer_engine", "natten2d"] or Module
         Either the name of a pre-defined attention implementation, or a user-provided Module implementing
         the :math:`(B, L, D) \rightarrow (B, L, D)` interface. Options: ``"timm"`` (see
-        :class:`~physicsnemo.models.dit.layers.TimmSelfAttention`), ``"transformer_engine"``
-        (see :class:`~physicsnemo.models.dit.layers.TESelfAttention`), ``"natten2d"``
-        (see :class:`~physicsnemo.models.dit.layers.Natten2DSelfAttention`). The expected
-        interface is :class:`~physicsnemo.models.dit.layers.AttentionModuleBase`. Default ``"timm"``.
+        :class:`~physicsnemo.nn.module.dit_layers.TimmSelfAttention`), ``"transformer_engine"``
+        (see :class:`~physicsnemo.nn.module.dit_layers.TESelfAttention`), ``"natten2d"``
+        (see :class:`~physicsnemo.nn.module.dit_layers.Natten2DSelfAttention`). The expected
+        interface is :class:`~physicsnemo.nn.module.dit_layers.AttentionModuleBase`. Default ``"timm"``.
     layernorm_backend : Literal["apex", "torch"], optional, default="torch"
         The layer normalization implementation.
     norm_eps : float, optional, default=1e-6
@@ -560,7 +561,7 @@ class DiTBlock(nn.Module):
     mlp_ratio : float, optional, default=4.0
         The ratio for the MLP's hidden dimension.
     intermediate_dropout : bool, optional, default=False
-        Whether to apply :class:`~physicsnemo.models.dit.layers.PerSampleDropout` before attention.
+        Whether to apply :class:`~physicsnemo.nn.module.dit_layers.PerSampleDropout` before attention.
     attn_drop_rate : float, optional, default=0.0
         The dropout rate for the attention operation.
     proj_drop_rate : float, optional, default=0.0

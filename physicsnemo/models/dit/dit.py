@@ -23,15 +23,13 @@ from jaxtyping import Float
 
 from physicsnemo.core.meta import ModelMetaData
 from physicsnemo.core.module import Module
-from physicsnemo.models.dit.conditioning_embedders import (
+from physicsnemo.nn import (
     ConditioningEmbedder,
     ConditioningEmbedderType,
-    get_conditioning_embedder,
-)
-from physicsnemo.models.dit.layers import (
     DetokenizerModuleBase,
     DiTBlock,
     TokenizerModuleBase,
+    get_conditioning_embedder,
     get_detokenizer,
     get_tokenizer,
 )
