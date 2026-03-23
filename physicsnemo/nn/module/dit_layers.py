@@ -27,13 +27,13 @@ from timm.layers import RmsNorm
 
 from physicsnemo.core import Module
 from physicsnemo.core.version_check import OptionalImport, check_version_spec
-from physicsnemo.nn.module.drop import DropPath
-from physicsnemo.nn.module.mlp_layers import Mlp
 from physicsnemo.nn.functional.natten import na2d as _na2d_func
+from physicsnemo.nn.module.drop import DropPath
 from physicsnemo.nn.module.hpx.tokenizer import (
     HEALPixPatchDetokenizer,
     HEALPixPatchTokenizer,
 )
+from physicsnemo.nn.module.mlp_layers import Mlp
 from physicsnemo.nn.module.utils import PatchEmbed2D
 
 timm_v1_0_16 = check_version_spec("timm", "1.0.16", hard_fail=False)
