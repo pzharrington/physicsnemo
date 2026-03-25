@@ -824,6 +824,7 @@ class TokenizerModuleBase(Module, ABC):
 
     @abstractmethod
     def initialize_weights(self):
+        """Initialize the weights of the tokenizer."""
         pass
 
 
@@ -894,6 +895,7 @@ class PatchEmbed2DTokenizer(TokenizerModuleBase):
             self.pos_embed = 0.0
 
     def initialize_weights(self):
+        """Initialize the weights of the tokenizer."""
         # Initialize the tokenizer patch embedding projection (a Conv2D layer).
         w = self.x_embedder.proj.weight.data
         nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
@@ -1000,6 +1002,7 @@ class DetokenizerModuleBase(Module, ABC):
 
     @abstractmethod
     def initialize_weights(self):
+        """Initialize the weights of the detokenizer."""
         pass
 
 
@@ -1058,6 +1061,7 @@ class ProjReshape2DDetokenizer(DetokenizerModuleBase):
         )
 
     def initialize_weights(self):
+        """Initialize the weights of the detokenizer."""
         # Zero out the adaptive modulation and output projection weights
         nn.init.constant_(self.proj_layer.adaptive_modulation[-1].weight, 0)
         nn.init.constant_(self.proj_layer.adaptive_modulation[-1].bias, 0)

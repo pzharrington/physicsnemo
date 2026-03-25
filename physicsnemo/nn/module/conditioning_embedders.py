@@ -94,6 +94,7 @@ class ZeroConditioningEmbedder(Module):
 
     @property
     def output_dim(self) -> int:
+        r"""Output dimension of conditioning embedding."""
         return self._output_dim
 
     def forward(
@@ -165,6 +166,7 @@ class DiTConditionEmbedder(Module):
 
     @property
     def output_dim(self) -> int:
+        r"""Output dimension of conditioning embedding."""
         return self._output_dim
 
     def forward(
@@ -248,6 +250,7 @@ class EDMConditionEmbedder(Module):
 
     @property
     def output_dim(self) -> int:
+        r"""Output dimension of conditioning embedding."""
         return self._output_dim
 
     def forward(
