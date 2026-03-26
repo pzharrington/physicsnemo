@@ -20,9 +20,31 @@ from typing import Any, Tuple
 
 import torch
 from tensordict import TensorDict
+from torch.distributed.tensor import DTensor
+from torch.distributed.tensor.placement_types import Replicate
 
 from physicsnemo.core.meta import ModelMetaData
 from physicsnemo.core.module import Module
+
+
+def _ensure_plain_tensor(t: torch.Tensor) -> torch.Tensor:
+    """Unwrap fully-replicated DTensors to plain tensors.
+
+    FSDP wraps registered buffers as DTensors with ``Replicate`` placement.
+    Arithmetic in ``compute_coefficients`` propagates that wrapping to the
+    resulting coefficient tensors.  These must be converted back to plain
+    tensors before element-wise operations with non-DTensor inputs (plain
+    tensors or ``ShardTensor``).
+
+    Only DTensors whose *every* placement is ``Replicate`` are unwrapped;
+    any tensor with a ``Shard`` placement (e.g. a ``ShardTensor``) is left
+    untouched so its sharding metadata is preserved.
+    """
+    if isinstance(t, DTensor) and all(
+        isinstance(p, Replicate) for p in t.placements
+    ):
+        return t.to_local()
+    return t
 
 
 class BaseAffinePreconditioner(Module, ABC):
@@ -441,6 +463,14 @@ class BaseAffinePreconditioner(Module, ABC):
 
         # Compute preconditioning coefficients
         c_in, c_noise, c_out, c_skip = self.compute_coefficients(sigma_t)
+
+        # FSDP may convert model buffers (e.g. sigma_data) to DTensors, which
+        # propagates through compute_coefficients.  Unwrap fully-replicated
+        # DTensors back to plain tensors so that element-wise ops with
+        # non-DTensor inputs (plain tensors or ShardTensors) work correctly.
+        c_in, c_noise, c_out, c_skip = (
+            _ensure_plain_tensor(c) for c in (c_in, c_noise, c_out, c_skip)
+        )
 
         # Forward through the underlying model
         if condition is not None:

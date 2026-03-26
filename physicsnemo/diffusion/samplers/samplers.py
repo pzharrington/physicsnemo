@@ -40,6 +40,42 @@ SOLVERS: Dict[str, type[Solver]] = {
 }
 
 
+def _maybe_replicate_timesteps(
+    t_steps: Float[Tensor, " N_plus_1"],
+    xN: Float[Tensor, " B *dims"],
+) -> Float[Tensor, " N_plus_1"]:
+    """Replicate ``t_steps`` on the device mesh of ``xN`` when needed.
+
+    If ``xN`` lives on a device mesh (e.g. a ``ShardTensor`` used for domain
+    parallelism) but ``t_steps`` does not, this function wraps ``t_steps`` as a
+    replicated distributed tensor on the same mesh.  This ensures that solver
+    arithmetic between latents and time-step scalars is type-compatible.
+
+    When ``xN`` is a plain tensor, or ``t_steps`` is already on a mesh, this is
+    a no-op.
+    """
+    xN_mesh = getattr(xN, "device_mesh", None)
+    if xN_mesh is None or hasattr(t_steps, "device_mesh"):
+        return t_steps
+
+    try:
+        from physicsnemo.domain_parallel.shard_tensor import scatter_tensor
+        from torch.distributed.tensor.placement_types import Replicate
+        import torch.distributed as dist
+
+        source_rank = dist.get_global_rank(xN_mesh.get_group(), 0)
+        return scatter_tensor(
+            t_steps,
+            source_rank,
+            xN_mesh,
+            placements=(Replicate(),),
+            global_shape=t_steps.shape,
+            dtype=t_steps.dtype,
+        )
+    except ImportError:
+        return t_steps
+
+
 def sample(
     denoiser: Denoiser,
     xN: Float[Tensor, " B *dims"],
@@ -341,6 +377,12 @@ def sample(
         t_steps = time_steps.to(device=xN.device, dtype=xN.dtype)
     else:
         t_steps = noise_scheduler.timesteps(num_steps, device=xN.device, dtype=xN.dtype)
+
+    # When xN is a distributed tensor (e.g. ShardTensor for domain
+    # parallelism) but t_steps is a plain tensor, replicate t_steps on the
+    # same mesh so that solver arithmetic between latents and timesteps is
+    # type-compatible.
+    t_steps = _maybe_replicate_timesteps(t_steps, xN)
 
     # Main sampling loop
     samples: List[Tensor] = []

@@ -23,7 +23,7 @@ import torch
 
 from physicsnemo.core.warnings import LegacyFeatureWarning
 from physicsnemo.diffusion.multi_diffusion import GridPatching2D
-from physicsnemo.diffusion.preconditioners import EDMPrecond, EDMPreconditioner
+from physicsnemo.diffusion.preconditioners import EDMPreconditioner
 from tensordict import TensorDict
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
@@ -471,16 +471,7 @@ def deterministic_sampler(
             patching=patching, input=x_hat
         ).to(latents.device)
 
-        if isinstance(net, EDMPrecond):
-            # Conditioning info is passed as keyword arg
-            denoised = net(
-                x_hat_batch / s(t_hat),
-                sigma(t_hat),
-                condition=x_lr,
-                class_labels=class_labels,
-                **optional_args,
-            ).to(dtype)
-        elif isinstance(net, (EDMPreconditioner, FSDP)):
+        if isinstance(net, (EDMPreconditioner, FSDP)):
             denoised = net(
                 x_hat_batch / s(t_hat),
                 sigma(t_hat).reshape(1).repeat(x_hat_batch.shape[0]),
@@ -519,16 +510,7 @@ def deterministic_sampler(
                 patching=patching, input=x_prime
             ).to(latents.device)
 
-            if isinstance(net, EDMPrecond):
-                # Conditioning info is passed as keyword arg
-                denoised = net(
-                    x_prime_batch / s(t_prime),
-                    sigma(t_prime),
-                    condition=x_lr,
-                    class_labels=class_labels,
-                    **optional_args,
-                ).to(dtype)
-            elif isinstance(net, (EDMPreconditioner, FSDP)):
+            if isinstance(net, (EDMPreconditioner, FSDP)):
                 denoised = net(
                     x_prime_batch / s(t_prime),
                     sigma(t_prime).reshape(1).repeat(x_hat_batch.shape[0]),

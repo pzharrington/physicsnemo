@@ -16,12 +16,15 @@
 
 """Denoising score matching losses for diffusion model training."""
 
-from typing import Callable, Literal
+from __future__ import annotations
+
+from typing import Any, Callable, Literal
 
 import torch
 from jaxtyping import Float
 from tensordict import TensorDict
 from torch import Tensor
+from torch.distributed.device_mesh import DeviceMesh
 
 from physicsnemo.diffusion.base import DiffusionModel
 from physicsnemo.diffusion.noise_schedulers import NoiseScheduler
@@ -119,6 +122,12 @@ class MSEDSMLoss:
         Reduction to apply to the output: ``"none"`` returns the
         per-element loss, ``"mean"`` returns the mean over all elements,
         ``"sum"`` returns the sum over all elements.
+    device_mesh : DeviceMesh, optional
+        Device mesh for domain-parallel training.  When provided, sampled
+        diffusion times are broadcast across the mesh so that all spatial
+        shards within the same domain-parallel group see the same noise
+        level.  Internally wraps the scheduler with
+        :class:`~physicsnemo.diffusion.DomainParallelSchedulerWrapper`.
 
     Raises
     ------
@@ -264,8 +273,18 @@ class MSEDSMLoss:
         ]
         | None = None,
         reduction: Literal["none", "mean", "sum"] = "mean",
+        device_mesh: DeviceMesh | None = None,
     ) -> None:
         self.model = model
+
+        if device_mesh is not None:
+            from physicsnemo.diffusion.domain_parallel import (
+                DomainParallelSchedulerWrapper,
+            )
+
+            noise_scheduler = DomainParallelSchedulerWrapper(
+                noise_scheduler, device_mesh
+            )
         self.noise_scheduler = noise_scheduler
 
         if prediction_type == "x0":
@@ -299,6 +318,7 @@ class MSEDSMLoss:
         self,
         x0: Float[Tensor, " B *dims"],
         condition: Float[Tensor, " B *cond_dims"] | TensorDict | None = None,
+        **model_kwargs: Any,
     ) -> Float[Tensor, " B *dims"] | Float[Tensor, ""]:
         r"""
         Compute the denoising score matching loss.
@@ -311,6 +331,8 @@ class MSEDSMLoss:
         condition : Tensor, TensorDict, or None, optional, default=None
             Conditioning information passed to the model. See
             :class:`~physicsnemo.diffusion.DiffusionModel` for details.
+        **model_kwargs : Any
+            Additional keyword arguments forwarded to the model
 
         Returns
         -------
@@ -322,7 +344,7 @@ class MSEDSMLoss:
         B = x0.shape[0]
         t = self.noise_scheduler.sample_time(B, device=x0.device, dtype=x0.dtype)
         x_t = self.noise_scheduler.add_noise(x0, t)
-        prediction = self.model(x_t, t, condition=condition)
+        prediction = self.model(x_t, t, condition=condition, **model_kwargs)
         x0_pred = self._to_x0(prediction, x_t, t)
         loss = (x0_pred - x0) ** 2
         w = self.noise_scheduler.loss_weight(t)
@@ -373,6 +395,9 @@ class WeightedMSEDSMLoss:
     reduction : {"none", "mean", "sum"}, default="mean"
         Reduction to apply to the output: ``"none"`` returns the
         per-element loss, ``"mean"`` the mean, ``"sum"`` the sum.
+    device_mesh : DeviceMesh, optional
+        Device mesh for domain-parallel training.  See
+        :class:`MSEDSMLoss` for details.
 
     Examples
     --------
@@ -415,8 +440,18 @@ class WeightedMSEDSMLoss:
         ]
         | None = None,
         reduction: Literal["none", "mean", "sum"] = "mean",
+        device_mesh: DeviceMesh | None = None,
     ) -> None:
         self.model = model
+
+        if device_mesh is not None:
+            from physicsnemo.diffusion.domain_parallel import (
+                DomainParallelSchedulerWrapper,
+            )
+
+            noise_scheduler = DomainParallelSchedulerWrapper(
+                noise_scheduler, device_mesh
+            )
         self.noise_scheduler = noise_scheduler
 
         if prediction_type == "x0":
@@ -451,6 +486,7 @@ class WeightedMSEDSMLoss:
         x0: Float[Tensor, " B *dims"],
         weight: Float[Tensor, " B *dims"],
         condition: Float[Tensor, " B *cond_dims"] | TensorDict | None = None,
+        **model_kwargs: Any,
     ) -> Float[Tensor, " B *dims"] | Float[Tensor, ""]:
         r"""
         Compute the weighted denoising score matching loss.
@@ -467,6 +503,8 @@ class WeightedMSEDSMLoss:
         condition : Tensor, TensorDict, or None, optional, default=None
             Conditioning information passed to the model. See
             :class:`~physicsnemo.diffusion.DiffusionModel` for details.
+        **model_kwargs : Any
+            Additional keyword arguments forwarded to the model
 
         Returns
         -------
@@ -478,7 +516,7 @@ class WeightedMSEDSMLoss:
         B = x0.shape[0]
         t = self.noise_scheduler.sample_time(B, device=x0.device, dtype=x0.dtype)
         x_t = self.noise_scheduler.add_noise(x0, t)
-        prediction = self.model(x_t, t, condition=condition)
+        prediction = self.model(x_t, t, condition=condition, **model_kwargs)
         x0_pred = self._to_x0(prediction, x_t, t)
         loss = weight * (x0_pred - x0) ** 2
         w = self.noise_scheduler.loss_weight(t)
