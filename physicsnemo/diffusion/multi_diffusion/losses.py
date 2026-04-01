@@ -24,6 +24,7 @@ from jaxtyping import Float
 from tensordict import TensorDict
 from torch import Tensor
 
+from physicsnemo.diffusion.metrics.losses import _apply_loss_weight
 from physicsnemo.diffusion.multi_diffusion.models import MultiDiffusionModel2D
 from physicsnemo.diffusion.noise_schedulers import NoiseScheduler
 
@@ -68,6 +69,22 @@ class MultiDiffusionMSEDSMLoss:
     on each patch. A separate diffusion time is sampled per patch, giving
     :math:`P \times B` independent noise levels per training step.
 
+    All training functionality is centered around a **noise scheduler** that
+    must implement the
+    :class:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler` protocol.
+    At each training step the noise scheduler provides:
+
+    - **Time sampling** via :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.sample_time`: draws
+      random diffusion times :math:`t` — one per patch.
+    - **Noise injection** via :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.add_noise`: produces
+      the noisy state :math:`\mathbf{x}_t` from clean data
+      :math:`\mathbf{x}_0`.
+    - **Loss weighting** via :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.loss_weight`: returns
+      the per-sample weight :math:`w(t)`.  Weights may be scalar
+      :math:`(N,)` or per-channel :math:`(N, C)` when the scheduler uses
+      per-channel ``sigma_data`` (see
+      :class:`~physicsnemo.diffusion.noise_schedulers.EDMNoiseScheduler`).
+
     The model **must** have a random patching strategy configured via
     :meth:`~MultiDiffusionModel2D.set_random_patching` before using this
     loss.
@@ -96,7 +113,10 @@ class MultiDiffusionMSEDSMLoss:
     noise_scheduler : NoiseScheduler
         Noise scheduler implementing the
         :class:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler`
-        protocol.
+        protocol, providing the methods:
+        :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.sample_time`,
+        :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.add_noise`, and
+        :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.loss_weight`.
     prediction_type : Literal["x0", "score"], default="x0"
         Type of prediction the model outputs.
     score_to_x0_fn : Callable[[Tensor, Tensor, Tensor], Tensor], optional
@@ -288,8 +308,9 @@ class MultiDiffusionMSEDSMLoss:
 
         x0_pred = self._to_x0(prediction, x_t, t)
 
+        loss = (x0_pred - x0_patched) ** 2
         w = self.noise_scheduler.loss_weight(t)
-        loss = w.reshape(-1, *([1] * (x0_pred.ndim - 1))) * (x0_pred - x0_patched) ** 2
+        loss = _apply_loss_weight(w, x0_patched.ndim) * loss
         return self._reduce(loss)
 
 
@@ -309,6 +330,12 @@ class MultiDiffusionWeightedMSEDSMLoss:
         \left[ w(t) \left\| \mathbf{m} \odot
         \left(\hat{\mathbf{x}}_0(\mathbf{x}_t, t)
         - \mathbf{x}_0\right) \right\|^2 \right]
+
+    The noise scheduler's
+    :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.loss_weight`
+    may return scalar :math:`(N,)` or per-channel :math:`(N, C)` weights
+    when the scheduler uses per-channel ``sigma_data`` (see
+    :class:`~physicsnemo.diffusion.noise_schedulers.EDMNoiseScheduler`).
 
     The model **must** have a random patching strategy configured via
     :meth:`~MultiDiffusionModel2D.set_random_patching` before using this
@@ -336,7 +363,10 @@ class MultiDiffusionWeightedMSEDSMLoss:
     noise_scheduler : NoiseScheduler
         Noise scheduler implementing the
         :class:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler`
-        protocol.
+        protocol, providing the methods:
+        :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.sample_time`,
+        :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.add_noise`, and
+        :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.loss_weight`.
     prediction_type : {"x0", "score"}, default="x0"
         Type of prediction the model outputs.
     score_to_x0_fn : callable, optional
@@ -522,10 +552,7 @@ class MultiDiffusionWeightedMSEDSMLoss:
 
         x0_pred = self._to_x0(prediction, x_t, t)
 
+        loss = weight_patched * (x0_pred - x0_patched) ** 2
         w = self.noise_scheduler.loss_weight(t)
-        loss = (
-            w.reshape(-1, *([1] * (x0_pred.ndim - 1)))
-            * weight_patched
-            * (x0_pred - x0_patched) ** 2
-        )
+        loss = _apply_loss_weight(w, x0_patched.ndim) * loss
         return self._reduce(loss)

@@ -175,6 +175,11 @@ class DomainParallelSchedulerWrapper:
         Tensor
             Sharded initial noisy latent of shape :math:`(B, *spatial\_shape)`.
         """
+        # Unwrap tN to a plain tensor if it is a DTensor/ShardTensor
+        # (e.g. from timesteps() which returns Replicate placement),
+        # because the inner scheduler operates on plain tensors.
+        if hasattr(tN, "to_local"):
+            tN = tN.to_local()
         xN = self._inner.init_latents(spatial_shape, tN, device=device, dtype=dtype)
         return self._scatter(xN, placements=(Shard(self._shard_dim),))
 

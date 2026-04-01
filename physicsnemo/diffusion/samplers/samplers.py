@@ -59,9 +59,10 @@ def _maybe_replicate_timesteps(
         return t_steps
 
     try:
-        from physicsnemo.domain_parallel.shard_tensor import scatter_tensor
-        from torch.distributed.tensor.placement_types import Replicate
         import torch.distributed as dist
+        from torch.distributed.tensor.placement_types import Replicate
+
+        from physicsnemo.domain_parallel.shard_tensor import scatter_tensor
 
         source_rank = dist.get_global_rank(xN_mesh.get_group(), 0)
         return scatter_tensor(

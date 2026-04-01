@@ -18,50 +18,35 @@
 """Loss functions for StormCast training.
 
 Diffusion training uses :class:`~physicsnemo.diffusion.metrics.losses.MSEDSMLoss`
-with an :class:`~physicsnemo.diffusion.noise_schedulers.EDMNoiseScheduler`.
-Domain-parallel sigma replication is handled automatically via the
-``device_mesh`` parameter of ``MSEDSMLoss`` (which wraps the scheduler with
-:class:`~physicsnemo.diffusion.DomainParallelSchedulerWrapper`).
+with an :class:`~physicsnemo.diffusion.noise_schedulers.EDMNoiseScheduler` or
+:class:`~physicsnemo.diffusion.noise_schedulers.EDMLogUniformNoiseScheduler`.
+When domain parallelism is active, the caller wraps the scheduler with
+:class:`~physicsnemo.diffusion.DomainParallelSchedulerWrapper` (via
+:meth:`~utils.parallel.ParallelHelper.make_domain_parallel_scheduler`) before
+passing it to the loss so that sampled sigmas are broadcast across spatial
+shards.
 """
 
-import math
 from collections.abc import Sequence
 
 import numpy as np
 import torch
 
-from physicsnemo.diffusion.metrics.losses import MSEDSMLoss
-from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
+from physicsnemo.diffusion.noise_schedulers import (
+    EDMLogUniformNoiseScheduler,
+    EDMNoiseScheduler,
+)
 
 
-class _EDMNoiseSchedulerLogUniform(EDMNoiseScheduler):
-    """EDMNoiseScheduler variant with log-uniform sigma sampling for training.
-
-    Inherits timestep generation, noise addition, and loss weighting from
-    ``EDMNoiseScheduler``; only ``sample_time`` differs by drawing sigma
-    uniformly in log-space between ``sigma_min`` and ``sigma_max``.
-    """
-
-    def sample_time(self, N, *, device=None, dtype=None):
-        u = torch.rand(N, device=device, dtype=dtype)
-        log_min = math.log(self.sigma_min)
-        log_max = math.log(self.sigma_max)
-        return (log_min + u * (log_max - log_min)).exp()
-
-
-def build_diffusion_loss(
-    model: torch.nn.Module,
+def build_noise_scheduler(
     loss_cfg,
     device: torch.device,
     logger=None,
-    device_mesh=None,
-) -> MSEDSMLoss:
-    """Create an :class:`~physicsnemo.diffusion.metrics.losses.MSEDSMLoss` from Hydra config.
+) -> EDMNoiseScheduler:
+    """Create an :class:`~physicsnemo.diffusion.noise_schedulers.EDMNoiseScheduler` from Hydra loss config.
 
     Parameters
     ----------
-    model : torch.nn.Module
-        Preconditioned diffusion network.
     loss_cfg : object
         Loss config with ``sigma_distribution``, ``sigma_data``, and
         distribution-specific params (``P_mean``/``P_std`` or
@@ -69,89 +54,86 @@ def build_diffusion_loss(
     device : torch.device
         Device for any tensor sigma_data.
     logger : optional
-        Logger for warnings.
-    device_mesh : DeviceMesh, optional
-        Domain-parallel device mesh.  When provided, sampled sigma values
-        are broadcast across the mesh so all spatial shards see the same
-        noise level.
+        Logger for informational messages.
 
     Returns
     -------
-    MSEDSMLoss
+    EDMNoiseScheduler
     """
     sigma_data = loss_cfg.sigma_data
     if isinstance(sigma_data, Sequence):
-        sigma_data_tensor = torch.as_tensor(
-            list(sigma_data), dtype=torch.float32, device=device
-        )[None, :, None, None]
-        sigma_data_scalar = float(sigma_data_tensor.mean())
+        sigma_data = list(sigma_data)
         if logger:
             logger.info(
-                f"Per-channel sigma_data detected (mean={sigma_data_scalar:.4f}). "
-                "The modern EDMNoiseScheduler uses a scalar sigma_data for loss "
-                "weighting. Per-channel support requires a core library extension."
+                f"Per-channel sigma_data detected ({len(sigma_data)} channels)."
             )
     else:
-        sigma_data_scalar = float(sigma_data)
+        sigma_data = float(sigma_data)
 
     sigma_dist = loss_cfg.sigma_distribution
     if sigma_dist == "lognormal":
-        noise_scheduler = EDMNoiseScheduler(
-            sigma_data=sigma_data_scalar,
+        return EDMNoiseScheduler(
+            sigma_data=sigma_data,
             P_mean=loss_cfg.P_mean,
             P_std=loss_cfg.P_std,
         )
     elif sigma_dist == "loguniform":
-        noise_scheduler = _EDMNoiseSchedulerLogUniform(
+        return EDMLogUniformNoiseScheduler(
             sigma_min=loss_cfg.sigma_min,
             sigma_max=loss_cfg.sigma_max,
-            sigma_data=sigma_data_scalar,
+            sigma_data=sigma_data,
         )
     else:
         raise ValueError(
             "training.loss.sigma_distribution must be 'lognormal' or 'loguniform'"
         )
 
-    return MSEDSMLoss(
-        model, noise_scheduler, reduction="none", device_mesh=device_mesh
-    )
 
+class RegressionLoss:
+    """MSE loss for a regression model.
 
-def regression_loss_fn(
-    net,
-    images: torch.Tensor,
-    condition: torch.Tensor,
-    class_labels=None,
-    lead_time_label: torch.Tensor | None = None,
-    augment_pipe=None,
-    return_model_outputs: bool = False,
-) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-    """MSE loss for the StormCast regression model.
+    Holds a reference to the model so that the call signature mirrors
+    :class:`~physicsnemo.diffusion.metrics.losses.WeightedMSEDSMLoss`:
+    ``loss_fn(x0, weight, condition=..., **kwargs)``.
 
-    Shares a compatible call signature with the regression training loop.
-
-    Args:
-        net: regression network (e.g. StormCastUNet).
-        images: target data, shape ``[B, C, H, W]``.
-        condition: model input, shape ``[B, C_cond, H, W]``.
-        class_labels: unused (present for call-signature parity).
-        lead_time_label: optional lead-time label, shape ``(B,)``.
-        augment_pipe: optional data augmentation callable.
-        return_model_outputs: if True, return ``(loss, prediction)``.
-
-    Returns:
-        Per-pixel squared error ``[B, C, H, W]``, or ``(loss, prediction)``
-        when *return_model_outputs* is True.
+    Parameters
+    ----------
+    model : torch.nn.Module
+        Regression network (e.g. ``StormCastUNet``).
     """
-    y, augment_labels = (
-        augment_pipe(images) if augment_pipe is not None else (images, None)
-    )
-    labels = {} if lead_time_label is None else {"lead_time_label": lead_time_label}
-    D_yn = net(x=condition, **labels)
-    loss = (D_yn - y) ** 2
-    if return_model_outputs:
-        return loss, D_yn
-    return loss
+
+    def __init__(self, model: torch.nn.Module) -> None:
+        self.model = model
+
+    def __call__(
+        self,
+        x0: torch.Tensor,
+        weight: torch.Tensor,
+        *,
+        condition: torch.Tensor,
+        lead_time_label: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Compute per-pixel squared error, optionally weighted.
+
+        Parameters
+        ----------
+        x0 : torch.Tensor
+            Target data, shape ``[B, C, H, W]``.
+        weight : torch.Tensor
+            Per-element weight broadcastable to ``x0`` shape.
+        condition : torch.Tensor
+            Model input, shape ``[B, C_cond, H, W]``.
+        lead_time_label : torch.Tensor | None
+            Optional lead-time label, shape ``(B,)``.
+
+        Returns
+        -------
+        torch.Tensor
+            Weighted per-pixel squared error ``[B, C, H, W]``.
+        """
+        labels = {} if lead_time_label is None else {"lead_time_label": lead_time_label}
+        prediction = self.model(x=condition, **labels)
+        return weight * (prediction - x0) ** 2
 
 
 class SigmaBinTracker:

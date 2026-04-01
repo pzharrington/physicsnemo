@@ -99,11 +99,13 @@ available at three levels:
   - the inverse mapping :math:`\sigma^{-1}(\sigma) = t` from noise level back to time
   - the discretization of the diffusion time grid
 
-- **Ready-to-use schedules**: Five concrete implementations that work out of
+- **Ready-to-use schedules**: Six concrete implementations that work out of
   the box:
 
   - :class:`EDMNoiseScheduler` --- :math:`\alpha(t)=1`,
     :math:`\sigma(t)=t`.  The recommended default for most applications.
+  - :class:`EDMLogUniformNoiseScheduler` --- EDM variant that samples
+    training times uniformly in log-space instead of from a log-normal.
   - :class:`VENoiseScheduler` --- Variance Exploding schedule.
   - :class:`VPNoiseScheduler` --- Variance Preserving schedule.
   - :class:`IDDPMNoiseScheduler` --- Improved DDPM schedule.
@@ -133,6 +135,14 @@ API Reference
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.diffusion.noise_schedulers.EDMNoiseScheduler
+    :show-inheritance:
+    :members:
+    :exclude-members: __init__
+
+:code:`EDMLogUniformNoiseScheduler`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: physicsnemo.diffusion.noise_schedulers.EDMLogUniformNoiseScheduler
     :show-inheritance:
     :members:
     :exclude-members: __init__

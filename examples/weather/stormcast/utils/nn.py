@@ -25,7 +25,6 @@ import importlib
 from physicsnemo.core import Module
 from physicsnemo.models.diffusion_unets import StormCastUNet
 from physicsnemo.diffusion.preconditioners import EDMPreconditioner
-from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
 from physicsnemo.diffusion.samplers import sample as diffusion_sample
 from physicsnemo.diffusion.utils import ConcatConditionWrapper
 from physicsnemo.models.dit import DiT
@@ -262,6 +261,7 @@ def diffusion_model_forward(
     model: Module,
     condition: torch.Tensor,
     shape: Iterable[int],
+    scheduler: object,
     dtype: torch.dtype | None = None,
     device: torch.device | None = None,
     lead_time_label: torch.Tensor | None = None,
@@ -269,14 +269,14 @@ def diffusion_model_forward(
 ) -> torch.Tensor:
     """Run diffusion model sampling using the ``physicsnemo.diffusion`` API.
 
-    Uses :class:`~physicsnemo.diffusion.noise_schedulers.EDMNoiseScheduler` for
-    timestep generation and :func:`~physicsnemo.diffusion.samplers.sample` for
-    the reverse ODE integration.
+    Uses the provided noise scheduler for timestep generation and
+    :func:`~physicsnemo.diffusion.samplers.sample` for the reverse ODE
+    integration.
 
-    When the condition tensor is a ``ShardTensor`` (domain parallelism), the
-    scheduler is wrapped with
-    :class:`~physicsnemo.diffusion.DomainParallelSchedulerWrapper` so that
-    latents and timesteps are automatically distributed on the same mesh.
+    For domain-parallel inference, pass a scheduler that has already been
+    wrapped with
+    :class:`~physicsnemo.diffusion.DomainParallelSchedulerWrapper` (e.g.
+    via :meth:`~utils.parallel.ParallelHelper.make_domain_parallel_scheduler`).
 
     Parameters
     ----------
@@ -286,6 +286,9 @@ def diffusion_model_forward(
         Conditioning tensor for the model.
     shape : Iterable[int]
         Shape of the output tensor, e.g. ``(B, C, H, W)``.
+    scheduler : NoiseScheduler
+        Noise scheduler (e.g.
+        :class:`~physicsnemo.diffusion.noise_schedulers.EDMNoiseScheduler`).
     dtype : torch.dtype, optional
         Precision for ODE integration. Defaults to the condition tensor's dtype.
     device : torch.device, optional
@@ -293,8 +296,8 @@ def diffusion_model_forward(
     lead_time_label : torch.Tensor | None
         Lead-time labels forwarded to the model.
     sampler_args : dict
-        Sampler configuration. Supported keys: ``num_steps``, ``sigma_min``,
-        ``sigma_max``, ``rho``, ``solver`` (``"heun"`` or ``"euler"``),
+        Sampler configuration. Supported keys: ``num_steps``,
+        ``solver`` (``"heun"`` or ``"euler"``),
         ``S_churn``, ``S_min``, ``S_max``, ``S_noise``.
     """
     if isinstance(condition, TensorDict):
@@ -308,27 +311,11 @@ def diffusion_model_forward(
 
     sa = sampler_args
     num_steps = sa.get("num_steps", 18)
-    sigma_min = sa.get("sigma_min", 0.002)
-    sigma_max = sa.get("sigma_max", 80.0)
-    rho = sa.get("rho", 7.0)
     solver_name = sa.get("solver", "heun")
     S_churn = float(sa.get("S_churn", 0))
     S_min = float(sa.get("S_min", 0))
     S_max = float(sa.get("S_max", float("inf")))
     S_noise = float(sa.get("S_noise", 1))
-
-    scheduler = EDMNoiseScheduler(
-        sigma_min=sigma_min, sigma_max=sigma_max, rho=rho,
-    )
-
-    if hasattr(ref_tensor, "device_mesh"):
-        from physicsnemo.diffusion.domain_parallel import (
-            DomainParallelSchedulerWrapper,
-        )
-
-        scheduler = DomainParallelSchedulerWrapper(
-            scheduler, ref_tensor.device_mesh, shard_dim=2,
-        )
 
     B = shape[0]
     t_steps = scheduler.timesteps(num_steps, device=device, dtype=dtype)

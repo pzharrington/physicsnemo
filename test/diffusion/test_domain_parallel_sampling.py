@@ -34,6 +34,10 @@ from physicsnemo.diffusion.samplers import sample
 from physicsnemo.diffusion.samplers.samplers import _maybe_replicate_timesteps
 
 
+def denoiser(x, t):
+    return x / (1 + t.view(-1, *([1] * (x.ndim - 1))) ** 2)
+
+
 # =====================================================================
 # Non-distributed tests (plain tensors)
 # =====================================================================
@@ -50,7 +54,6 @@ def test_maybe_replicate_timesteps_noop_plain_tensors():
 def test_sample_plain_tensors():
     """sample() works end-to-end with plain tensors (no mesh)."""
     scheduler = EDMNoiseScheduler()
-    denoiser = lambda x, t: x / (1 + t.view(-1, *([1] * (x.ndim - 1))) ** 2)
     xN = torch.randn(2, 3, 8, 8) * 80
     x0 = sample(denoiser, xN, scheduler, num_steps=5, solver="euler")
     assert x0.shape == (2, 3, 8, 8)
@@ -87,7 +90,9 @@ def test_wrapper_init_latents_sharded(distributed_mesh):
 
     scheduler = EDMNoiseScheduler()
     wrapper = DomainParallelSchedulerWrapper(
-        scheduler, distributed_mesh, shard_dim=2,
+        scheduler,
+        distributed_mesh,
+        shard_dim=2,
     )
 
     tN = torch.tensor([80.0, 80.0], device="cuda")
@@ -105,13 +110,13 @@ def test_sample_auto_replicates_timesteps(distributed_mesh):
 
     scheduler = EDMNoiseScheduler()
     wrapper = DomainParallelSchedulerWrapper(
-        scheduler, distributed_mesh, shard_dim=2,
+        scheduler,
+        distributed_mesh,
+        shard_dim=2,
     )
 
     tN = torch.tensor([80.0, 80.0], device="cuda")
     xN = wrapper.init_latents((3, 16, 16), tN, device="cuda")
-
-    denoiser = lambda x, t: x / (1 + t.view(-1, *([1] * (x.ndim - 1))) ** 2)
 
     x0 = sample(denoiser, xN, scheduler, num_steps=3, solver="euler")
     assert x0.shape == (2, 3, 16, 16)
@@ -125,17 +130,21 @@ def test_sample_with_wrapper_timesteps(distributed_mesh):
 
     scheduler = EDMNoiseScheduler()
     wrapper = DomainParallelSchedulerWrapper(
-        scheduler, distributed_mesh, shard_dim=2,
+        scheduler,
+        distributed_mesh,
+        shard_dim=2,
     )
 
     t_steps = wrapper.timesteps(5, device="cuda")
     tN = t_steps[0].expand(2)
     xN = wrapper.init_latents((3, 16, 16), tN, device="cuda")
 
-    denoiser = lambda x, t: x / (1 + t.view(-1, *([1] * (x.ndim - 1))) ** 2)
-
     x0 = sample(
-        denoiser, xN, scheduler, num_steps=5,
-        solver="euler", time_steps=t_steps,
+        denoiser,
+        xN,
+        scheduler,
+        num_steps=5,
+        solver="euler",
+        time_steps=t_steps,
     )
     assert x0.shape == (2, 3, 16, 16)

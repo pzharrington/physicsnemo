@@ -18,6 +18,7 @@
 
 import math
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import Any, Literal, Protocol, Tuple, runtime_checkable
 
 import numpy as np
@@ -239,7 +240,7 @@ class NoiseScheduler(Protocol):
     def loss_weight(
         self,
         t: Float[Tensor, " N"],
-    ) -> Float[Tensor, " N"]:
+    ) -> Float[Tensor, "N *channels"]:  # noqa: F821
         r"""
         Compute loss weight for denoising score matching training.
 
@@ -254,8 +255,10 @@ class NoiseScheduler(Protocol):
         Returns
         -------
         Tensor
-            Loss weight of shape :math:`(N,)`, same device and dtype
-            as ``t``.
+            Loss weight with leading dimension :math:`N`.  Shape is
+            :math:`(N,)` for scalar ``sigma_data``, or :math:`(N, C)`
+            when the scheduler uses per-channel ``sigma_data`` (see
+            :class:`EDMNoiseScheduler`).
         """
         ...
 
@@ -559,7 +562,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
     def loss_weight(
         self,
         t: Float[Tensor, " N"],
-    ) -> Float[Tensor, " N"]:
+    ) -> Float[Tensor, "N *channels"]:  # noqa: F821
         r"""
         Compute loss weight for denoising score matching training.
 
@@ -579,8 +582,10 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         Returns
         -------
         Tensor
-            Loss weight of shape :math:`(N,)`, same device and dtype
-            as ``t``.
+            Loss weight with leading dimension :math:`N`.  Shape is
+            :math:`(N,)` for scalar ``sigma_data``, or :math:`(N, C)`
+            when the scheduler uses per-channel ``sigma_data`` (see
+            :class:`EDMNoiseScheduler`).
         """
         ...
 
@@ -992,6 +997,47 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
 
 
 # =============================================================================
+# Internal helpers
+# =============================================================================
+
+
+def _normalize_sigma_data(
+    sigma_data: float | Sequence[float] | Tensor,
+) -> float | Tensor:
+    """Coerce ``sigma_data`` to a canonical form.
+
+    Returns a plain ``float`` when scalar, or a 1-D ``Tensor`` when
+    per-channel.
+    """
+    if isinstance(sigma_data, Tensor):
+        if sigma_data.ndim == 0:
+            return float(sigma_data.item())
+        return sigma_data.detach().to(dtype=torch.float32).reshape(-1)
+    if isinstance(sigma_data, Sequence) and not isinstance(sigma_data, str):
+        return torch.as_tensor(list(sigma_data), dtype=torch.float32)
+    return float(sigma_data)
+
+
+def _edm_loss_weight(
+    sigma: Tensor,
+    sigma_data: float | Tensor,
+) -> Tensor:
+    """EDM loss weight supporting scalar or per-channel ``sigma_data``.
+
+    When ``sigma_data`` is a 1-D ``Tensor`` of length *C*, the returned
+    weight has shape ``(N, C)``; otherwise ``(N,)``.
+    """
+    if isinstance(sigma_data, Tensor):
+        sd = sigma_data.to(device=sigma.device, dtype=sigma.dtype)
+        # sigma: (N,) → (N, 1);  sd: (C,) → (1, C)
+        sigma = sigma.unsqueeze(-1)
+        sd = sd.unsqueeze(0)
+    else:
+        sd = sigma_data
+    return (sigma**2 + sd**2) / (sigma * sd) ** 2
+
+
+# =============================================================================
 # Concrete noise schedule implementations
 # =============================================================================
 
@@ -1022,9 +1068,14 @@ class EDMNoiseScheduler(LinearGaussianNoiseScheduler):
     rho : float, optional
         Exponent controlling time-step spacing. Larger values concentrate more
         steps at lower noise levels (better for fine details). By default 7.
-    sigma_data : float, optional
+    sigma_data : float or Sequence[float] or Tensor, optional
         Expected standard deviation of the training data, by default 0.5.
         Used by :meth:`loss_weight` to compute the per-sample loss weight.
+        When a scalar ``float`` is given, the same value is applied to all
+        channels.  When a ``Sequence[float]`` or 1-D ``Tensor`` of length
+        ``C`` is given, each channel receives its own weight and
+        :meth:`loss_weight` returns shape :math:`(N, C)` instead of
+        :math:`(N,)`.
     P_mean : float, optional
         Mean of the log-normal distribution used to sample training times,
         by default -1.2.
@@ -1065,6 +1116,15 @@ class EDMNoiseScheduler(LinearGaussianNoiseScheduler):
     >>> denoiser = scheduler.get_denoiser(x0_predictor=x0_predictor)
     >>> denoiser(xN, tN).shape  # ODE RHS for sampling
     torch.Size([4, 3, 8, 8])
+
+    Per-channel ``sigma_data`` for heterogeneous channels:
+
+    >>> sigma_per_ch = [0.3, 0.5, 0.7]
+    >>> scheduler_ch = EDMNoiseScheduler(sigma_data=sigma_per_ch)
+    >>> t = scheduler_ch.sample_time(4)
+    >>> w = scheduler_ch.loss_weight(t)
+    >>> w.shape
+    torch.Size([4, 3])
     """
 
     def __init__(
@@ -1072,14 +1132,14 @@ class EDMNoiseScheduler(LinearGaussianNoiseScheduler):
         sigma_min: float = 0.002,
         sigma_max: float = 80.0,
         rho: float = 7.0,
-        sigma_data: float = 0.5,
+        sigma_data: float | Sequence[float] | Tensor = 0.5,
         P_mean: float = -1.2,
         P_std: float = 1.2,
     ) -> None:
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
         self.rho = rho
-        self.sigma_data = sigma_data
+        self.sigma_data = _normalize_sigma_data(sigma_data)
         self.P_mean = P_mean
         self.P_std = P_std
 
@@ -1184,7 +1244,7 @@ class EDMNoiseScheduler(LinearGaussianNoiseScheduler):
     def loss_weight(
         self,
         t: Float[Tensor, " N"],
-    ) -> Float[Tensor, " N"]:
+    ) -> Float[Tensor, "N *channels"]:  # noqa: F821
         r"""
         Compute EDM loss weight.
 
@@ -1208,11 +1268,112 @@ class EDMNoiseScheduler(LinearGaussianNoiseScheduler):
         Returns
         -------
         Tensor
-            Loss weight of shape :math:`(N,)`.
+            Loss weight of shape :math:`(N,)` when ``sigma_data`` is a
+            scalar, or :math:`(N, C)` when ``sigma_data`` is per-channel.
         """
-        sd = self.sigma_data
-        sigma_t = self.sigma(t)
-        return (sigma_t**2 + sd**2) / (sigma_t * sd) ** 2
+        return _edm_loss_weight(self.sigma(t), self.sigma_data)
+
+
+class EDMLogUniformNoiseScheduler(EDMNoiseScheduler):
+    r"""
+    EDM noise scheduler with log-uniform sigma sampling for training.
+
+    Inherits time-step generation, noise addition, and loss weighting from
+    :class:`EDMNoiseScheduler`.  The only difference is the training-time
+    sampling strategy: instead of drawing :math:`\ln(\sigma)` from a normal
+    distribution, this scheduler draws :math:`\sigma` *uniformly in
+    log-space* between ``sigma_min`` and ``sigma_max``:
+
+    .. math::
+        \ln(\sigma) \sim \mathcal{U}\!\bigl[\ln(\sigma_{\min}),\;
+        \ln(\sigma_{\max})\bigr]
+
+    This can be preferable when the useful noise range is well characterised
+    and you want equal probability density across the full range in log-space.
+
+    Parameters
+    ----------
+    sigma_min : float, optional
+        Minimum noise level, by default 0.002.
+    sigma_max : float, optional
+        Maximum noise level, by default 80.
+    rho : float, optional
+        Exponent controlling time-step spacing. By default 7.
+    sigma_data : float or Sequence[float] or Tensor, optional
+        Expected standard deviation of the training data, by default 0.5.
+        Accepts per-channel values; see :class:`EDMNoiseScheduler`.
+
+    Note
+    ----
+    Reference: `Elucidating the Design Space of Diffusion-Based
+    Generative Models <https://arxiv.org/abs/2206.00364>`_
+
+    Examples
+    --------
+    >>> import torch
+    >>> from physicsnemo.diffusion.noise_schedulers import (
+    ...     EDMLogUniformNoiseScheduler,
+    ... )
+    >>>
+    >>> scheduler = EDMLogUniformNoiseScheduler(sigma_min=0.002, sigma_max=80.0)
+    >>> t = scheduler.sample_time(8)
+    >>> t.shape
+    torch.Size([8])
+    >>> (t >= 0.002).all() and (t <= 80.0).all()
+    True
+
+    Per-channel ``sigma_data`` works the same as :class:`EDMNoiseScheduler`:
+
+    >>> scheduler_ch = EDMLogUniformNoiseScheduler(sigma_data=[0.3, 0.5, 0.7])
+    >>> w = scheduler_ch.loss_weight(t)
+    >>> w.shape
+    torch.Size([8, 3])
+    """
+
+    def __init__(
+        self,
+        sigma_min: float = 0.002,
+        sigma_max: float = 80.0,
+        rho: float = 7.0,
+        sigma_data: float | Sequence[float] | Tensor = 0.5,
+    ) -> None:
+        super().__init__(
+            sigma_min=sigma_min,
+            sigma_max=sigma_max,
+            rho=rho,
+            sigma_data=sigma_data,
+        )
+
+    def sample_time(
+        self,
+        N: int,
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> Float[Tensor, " N"]:
+        r"""
+        Sample N diffusion times uniformly in log-space:
+        :math:`\ln(\sigma) \sim \mathcal{U}[\ln(\sigma_{\min}),
+        \ln(\sigma_{\max})]`.
+
+        Parameters
+        ----------
+        N : int
+            Number of time values to sample.
+        device : torch.device, optional
+            Device to place the tensor on.
+        dtype : torch.dtype, optional
+            Data type of the tensor.
+
+        Returns
+        -------
+        Tensor
+            Sampled diffusion times of shape :math:`(N,)`.
+        """
+        u = torch.rand(N, device=device, dtype=dtype)
+        log_min = math.log(self.sigma_min)
+        log_max = math.log(self.sigma_max)
+        return (log_min + u * (log_max - log_min)).exp()
 
 
 class VENoiseScheduler(LinearGaussianNoiseScheduler):
@@ -1896,9 +2057,12 @@ class StudentTEDMNoiseScheduler(LinearGaussianNoiseScheduler):
         Degrees of freedom for Student-t distribution. Must be > 2.
         As ``nu`` increases, the distribution approaches Gaussian. Lower values
         produce heavier tails. By default 10.
-    sigma_data : float, optional
+    sigma_data : float or Sequence[float] or Tensor, optional
         Expected standard deviation of the training data, by default 0.5.
         Used by :meth:`loss_weight` to compute the per-sample loss weight.
+        When a ``Sequence[float]`` or 1-D ``Tensor`` of length ``C`` is
+        given, each channel receives its own weight and :meth:`loss_weight`
+        returns shape :math:`(N, C)` instead of :math:`(N,)`.
     P_mean : float, optional
         Mean of the log-normal distribution used to sample training times,
         by default -1.2.
@@ -1943,7 +2107,7 @@ class StudentTEDMNoiseScheduler(LinearGaussianNoiseScheduler):
         sigma_max: float = 80.0,
         rho: float = 7.0,
         nu: int = 10,
-        sigma_data: float = 0.5,
+        sigma_data: float | Sequence[float] | Tensor = 0.5,
         P_mean: float = -1.2,
         P_std: float = 1.2,
     ) -> None:
@@ -1953,7 +2117,7 @@ class StudentTEDMNoiseScheduler(LinearGaussianNoiseScheduler):
         self.sigma_max = sigma_max
         self.rho = rho
         self.nu = nu
-        self.sigma_data = sigma_data
+        self.sigma_data = _normalize_sigma_data(sigma_data)
         self.P_mean = P_mean
         self.P_std = P_std
 
@@ -2058,7 +2222,7 @@ class StudentTEDMNoiseScheduler(LinearGaussianNoiseScheduler):
     def loss_weight(
         self,
         t: Float[Tensor, " N"],
-    ) -> Float[Tensor, " N"]:
+    ) -> Float[Tensor, "N *channels"]:  # noqa: F821
         r"""
         Compute Student-t EDM loss weight: :math:`w(t) = \frac{\tilde{\sigma}(t)^2 + \sigma_{\text{data}}^2}
         {\left(\tilde{\sigma}(t) \cdot \sigma_{\text{data}}\right)^2}`
@@ -2082,11 +2246,11 @@ class StudentTEDMNoiseScheduler(LinearGaussianNoiseScheduler):
         Returns
         -------
         Tensor
-            Loss weight of shape :math:`(N,)`.
+            Loss weight of shape :math:`(N,)` when ``sigma_data`` is a
+            scalar, or :math:`(N, C)` when ``sigma_data`` is per-channel.
         """
-        sd = self.sigma_data
         sigma_t_scaled = self.sigma(t) * np.sqrt(self.nu / (self.nu - 2))
-        return (sigma_t_scaled**2 + sd**2) / (sigma_t_scaled * sd) ** 2
+        return _edm_loss_weight(sigma_t_scaled, self.sigma_data)
 
     def _sample_student_t(
         self,

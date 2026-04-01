@@ -40,9 +40,7 @@ def _ensure_plain_tensor(t: torch.Tensor) -> torch.Tensor:
     any tensor with a ``Shard`` placement (e.g. a ``ShardTensor``) is left
     untouched so its sharding metadata is preserved.
     """
-    if isinstance(t, DTensor) and all(
-        isinstance(p, Replicate) for p in t.placements
-    ):
+    if isinstance(t, DTensor) and all(isinstance(p, Replicate) for p in t.placements):
         return t.to_local()
     return t
 

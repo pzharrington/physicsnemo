@@ -15,6 +15,7 @@
 # limitations under the License.
 
 from .noise_schedulers import (  # noqa: F401
+    EDMLogUniformNoiseScheduler,
     EDMNoiseScheduler,
     IDDPMNoiseScheduler,
     LinearGaussianNoiseScheduler,
