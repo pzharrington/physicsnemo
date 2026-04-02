@@ -501,7 +501,7 @@ class Trainer:
         )
         loss_fn = WeightedMSEDSMLoss(self.net, noise_scheduler, reduction="none")
 
-        sa = self.cfg.sampler.args.__dict__
+        sa = dict(self.cfg.sampler.args)
         sampling_scheduler = EDMNoiseScheduler(
             sigma_min=sa.get("sigma_min", 0.002),
             sigma_max=sa.get("sigma_max", 80.0),
@@ -847,7 +847,7 @@ class Trainer:
                 scheduler=self.sampling_scheduler,
                 dtype=state[1].dtype,
                 device=state[1].device,
-                sampler_args=self.cfg.sampler.args.__dict__.copy(),
+                sampler_args=dict(self.cfg.sampler.args),
                 lead_time_label=lead_time_label,
             )
             if "regression" in self.condition_list:
