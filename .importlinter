@@ -99,8 +99,8 @@ containers=
    physicsnemo.diffusion
 layers = 
    generate
-   samplers : metrics
-   multi_diffusion : preconditioners : guidance
+   samplers : metrics : multi_diffusion
+   preconditioners : guidance
    noise_schedulers
    utils
 
