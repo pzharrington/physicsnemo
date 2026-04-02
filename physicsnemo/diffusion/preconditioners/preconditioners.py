@@ -16,6 +16,7 @@
 
 import math
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import Any, Tuple
 
 import torch
@@ -43,6 +44,18 @@ def _ensure_plain_tensor(t: torch.Tensor) -> torch.Tensor:
     if isinstance(t, DTensor) and all(isinstance(p, Replicate) for p in t.placements):
         return t.to_local()
     return t
+
+
+def _replicate_on_mesh(t: torch.Tensor, mesh) -> torch.Tensor:
+    """Promote a plain tensor to a replicated ``DTensor`` on *mesh*.
+
+    Already-distributed tensors are returned unchanged.  Used after
+    :func:`_ensure_plain_tensor` to re-wrap coefficients for element-wise
+    arithmetic with ``ShardTensor`` data in domain-parallel training.
+    """
+    if isinstance(t, DTensor):
+        return t
+    return DTensor.from_local(t, device_mesh=mesh, placements=[Replicate()])
 
 
 class BaseAffinePreconditioner(Module, ABC):
@@ -460,15 +473,26 @@ class BaseAffinePreconditioner(Module, ABC):
         sigma_t = self.sigma(t).reshape(-1, *([1] * (x.ndim - 1)))
 
         # Compute preconditioning coefficients
+        # Unwrap to plain tensors so that element-wise arithmetic between
+        # coefficients and sampled sigma (may be Replicated in domain-parallel
+        # scenarios) is type-compatible.
+        sigma_t = _ensure_plain_tensor(sigma_t)
         c_in, c_noise, c_out, c_skip = self.compute_coefficients(sigma_t)
 
         # FSDP may convert model buffers (e.g. sigma_data) to DTensors, which
-        # propagates through compute_coefficients.  Unwrap fully-replicated
-        # DTensors back to plain tensors so that element-wise ops with
-        # non-DTensor inputs (plain tensors or ShardTensors) work correctly.
+        # propagates through compute_coefficients.  First unwrap to plain
+        # tensors, then re-promote to replicated DTensors on x's mesh when
+        # x is a ShardTensor so that element-wise arithmetic between
+        # coefficients and data is type-compatible.
         c_in, c_noise, c_out, c_skip = (
             _ensure_plain_tensor(c) for c in (c_in, c_noise, c_out, c_skip)
         )
+
+        x_mesh = getattr(x, "device_mesh", None)
+        if x_mesh is not None:
+            c_in, c_noise, c_out, c_skip = (
+                _replicate_on_mesh(c, x_mesh) for c in (c_in, c_noise, c_out, c_skip)
+            )
 
         # Forward through the underlying model
         if condition is not None:
@@ -914,7 +938,7 @@ class EDMPreconditioner(BaseAffinePreconditioner):
     With these coefficients, the preconditioned model output is expected to be an
     :math:`\mathbf{x}_0`-prediction (clean data estimate). This preconditioner
     is not directly compatible for score-prediction training or others.
-    
+
     For training, it is usually paired with
     :class:`~physicsnemo.diffusion.metrics.losses.MSEDSMLoss`
     (``prediction_type="x0"``) and
@@ -925,8 +949,17 @@ class EDMPreconditioner(BaseAffinePreconditioner):
     model : physicsnemo.Module
         The underlying neural network model to wrap with signature described in
         :class:`BaseAffinePreconditioner`.
-    sigma_data : float, optional
+    sigma_data : float or Sequence[float] or torch.Tensor, optional
         Expected standard deviation of the training data, by default 0.5.
+        When a scalar ``float`` is given, the same value is applied to all
+        channels.  When a ``Sequence[float]`` or 1-D ``Tensor`` of length
+        :math:`C` is given, each output channel receives its own
+        preconditioning and :math:`c_{\text{skip}}`, :math:`c_{\text{out}}`,
+        :math:`c_{\text{in}}` become per-channel while
+        :math:`c_{\text{noise}}` remains scalar.  The per-channel form should
+        be paired with an
+        :class:`~physicsnemo.diffusion.noise_schedulers.EDMNoiseScheduler`
+        constructed with the same per-channel ``sigma_data``.
 
     Forward
     -------
@@ -955,6 +988,8 @@ class EDMPreconditioner(BaseAffinePreconditioner):
 
     Examples
     --------
+    Scalar ``sigma_data`` (default):
+
     >>> import torch
     >>> from physicsnemo.core import Module
     >>> # Define a simple model satisfying the diffusion model interface
@@ -971,15 +1006,31 @@ class EDMPreconditioner(BaseAffinePreconditioner):
     >>> out = precond(x, t, condition=None)
     >>> out.shape
     torch.Size([2, 3, 16, 16])
+
+    Per-channel ``sigma_data`` for heterogeneous channels (e.g. weather
+    variables with different scales):
+
+    >>> precond_ch = EDMPreconditioner(model, sigma_data=[0.3, 0.5, 0.7])
+    >>> out_ch = precond_ch(x, t, condition=None)
+    >>> out_ch.shape
+    torch.Size([2, 3, 16, 16])
     """
 
     def __init__(
         self,
         model: Module,
-        sigma_data: float = 0.5,
+        sigma_data: float | Sequence[float] | torch.Tensor = 0.5,
     ) -> None:
         super().__init__(model)
-        self.register_buffer("sigma_data", torch.tensor(sigma_data))
+        if isinstance(sigma_data, torch.Tensor):
+            sd = sigma_data.detach().to(dtype=torch.float32).reshape(-1)
+        elif isinstance(sigma_data, Sequence) and not isinstance(sigma_data, str):
+            sd = torch.as_tensor(list(sigma_data), dtype=torch.float32)
+        else:
+            sd = torch.as_tensor(float(sigma_data))
+        if sd.ndim > 0 and sd.numel() == 1:
+            sd = sd.squeeze()
+        self.register_buffer("sigma_data", sd)
 
     def compute_coefficients(
         self, t: torch.Tensor
@@ -998,9 +1049,17 @@ class EDMPreconditioner(BaseAffinePreconditioner):
         Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
             Preconditioning coefficients (:math:`c_{\text{in}}`,
             :math:`c_{\text{noise}}`, :math:`c_{\text{out}}`,
-            :math:`c_{\text{skip}}`) of shape :math:`(B, 1, ..., 1)`.
+            :math:`c_{\text{skip}}`).  When ``sigma_data`` is scalar all
+            coefficients have shape :math:`(B, 1, ..., 1)`.  When
+            ``sigma_data`` is per-channel, :math:`c_{\text{in}}`,
+            :math:`c_{\text{out}}`, and :math:`c_{\text{skip}}` have shape
+            :math:`(B, C, 1, ..., 1)` while :math:`c_{\text{noise}}`
+            remains :math:`(B, 1, ..., 1)`.
         """
         sd = self.sigma_data
+        if sd.ndim > 0:
+            # Per-channel: reshape (C,) → (1, C, 1, ..., 1) for broadcasting
+            sd = sd.view(1, -1, *([1] * (t.ndim - 2)))
         c_skip = sd**2 / (t**2 + sd**2)
         c_out = t * sd / (t**2 + sd**2).sqrt()
         c_in = 1 / (sd**2 + t**2).sqrt()

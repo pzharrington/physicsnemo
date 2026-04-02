@@ -315,6 +315,85 @@ class TestEDMPreconditioner:
         assert precond.model is simple_model
         assert isinstance(precond, BaseAffinePreconditioner)
 
+    @pytest.mark.parametrize(
+        "sigma_data_input",
+        [
+            [0.3, 0.5, 0.7],
+            torch.tensor([0.3, 0.5, 0.7]),
+        ],
+        ids=["list", "tensor"],
+    )
+    def test_per_channel_constructor(self, simple_model, sigma_data_input):
+        """Test EDMPreconditioner with per-channel sigma_data."""
+        precond = EDMPreconditioner(simple_model, sigma_data=sigma_data_input)
+        assert precond.sigma_data.shape == (3,)
+        expected = torch.tensor([0.3, 0.5, 0.7])
+        assert torch.allclose(precond.sigma_data, expected)
+
+    def test_per_channel_coefficients_shape(self, model_config, device):
+        """Test compute_coefficients returns correct shapes for per-channel."""
+        model_cls, shape, _ = model_config
+        C = shape[1]
+        model = create_model_deterministic(model_cls, shape)
+        sigma_data = [0.5 + 0.1 * i for i in range(C)]
+        precond = EDMPreconditioner(model, sigma_data=sigma_data).to(device)
+
+        B = shape[0]
+        sigma_shape = (B,) + (1,) * (len(shape) - 1)
+        t = torch.rand(B, device=device).view(sigma_shape)
+
+        c_in, c_noise, c_out, c_skip = precond.compute_coefficients(t)
+
+        expected_ch_shape = (B, C) + (1,) * (len(shape) - 2)
+        assert c_in.shape == expected_ch_shape
+        assert c_out.shape == expected_ch_shape
+        assert c_skip.shape == expected_ch_shape
+        assert c_noise.shape == sigma_shape
+
+    def test_per_channel_forward(self, model_config, device):
+        """Test forward pass works with per-channel sigma_data."""
+        model_cls, shape, _ = model_config
+        C = shape[1]
+        model = create_model_deterministic(model_cls, shape)
+        sigma_data = [0.5 + 0.1 * i for i in range(C)]
+        precond = EDMPreconditioner(model, sigma_data=sigma_data).to(device)
+
+        use_condition = model_cls == ConvModel
+        data = generate_batch_data(
+            shape=shape, seed=42, device=device, use_condition=use_condition
+        )
+        out = precond(data["x"], data["t"], condition=data["condition"])
+        assert out.shape == shape
+
+    def test_per_channel_matches_scalar_when_uniform(self, model_config, device):
+        """Per-channel sigma_data with identical values must match scalar."""
+        model_cls, shape, _ = model_config
+        C = shape[1]
+        sd_value = 0.7
+
+        model_scalar = create_model_deterministic(model_cls, shape)
+        model_perchan = create_model_deterministic(model_cls, shape)
+
+        precond_scalar = EDMPreconditioner(model_scalar, sigma_data=sd_value).to(device)
+        precond_perchan = EDMPreconditioner(
+            model_perchan, sigma_data=[sd_value] * C
+        ).to(device)
+
+        use_condition = model_cls == ConvModel
+        data = generate_batch_data(
+            shape=shape, seed=42, device=device, use_condition=use_condition
+        )
+
+        out_scalar = precond_scalar(data["x"], data["t"], condition=data["condition"])
+        out_perchan = precond_perchan(data["x"], data["t"], condition=data["condition"])
+        assert torch.allclose(out_scalar, out_perchan, atol=1e-6)
+
+    def test_single_element_sequence_stored_as_scalar(self, simple_model):
+        """A length-1 sequence or tensor is stored as a 0-D buffer."""
+        precond = EDMPreconditioner(simple_model, sigma_data=[0.5])
+        assert precond.sigma_data.ndim == 0
+        assert precond.sigma_data.item() == pytest.approx(0.5)
+
 
 # =============================================================================
 # Non-Regression Tests (Parameterized Across All Preconditioners and Models)

@@ -183,6 +183,57 @@ class DomainParallelSchedulerWrapper:
         xN = self._inner.init_latents(spatial_shape, tN, device=device, dtype=dtype)
         return self._scatter(xN, placements=(Shard(self._shard_dim),))
 
+    def add_noise(
+        self,
+        x0: Float[Tensor, " B *dims"],
+        time: Float[Tensor, " B"],
+    ) -> Float[Tensor, " B *dims"]:
+        r"""Add noise, promoting scalar coefficients for ``ShardTensor`` data.
+
+        When ``x0`` is a ``ShardTensor``, the scalar :math:`\alpha(t)` and
+        :math:`\sigma(t)` coefficients from the inner scheduler are promoted
+        to replicated ``DTensor``\s on ``x0``'s device mesh so that
+        element-wise operations are type-compatible.
+
+        Falls back to the inner scheduler's ``add_noise`` when ``x0`` is a
+        plain tensor or when the inner scheduler does not expose ``sigma``
+        and ``alpha`` methods (i.e. is not a
+        :class:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler`).
+
+        Parameters
+        ----------
+        x0 : Tensor
+            Clean latent state of shape :math:`(B, *)`.
+        time : Tensor
+            Diffusion time values of shape :math:`(B,)`.
+
+        Returns
+        -------
+        Tensor
+            Noisy latent state of shape :math:`(B, *)`.
+        """
+        mesh = getattr(x0, "device_mesh", None)
+        if mesh is None or not hasattr(self._inner, "sigma"):
+            return self._inner.add_noise(x0, time)
+
+        from torch.distributed.tensor import DTensor
+
+        t_bc = time.reshape(-1, *([1] * (x0.ndim - 1)))
+        alpha_t = self._inner.alpha(t_bc)
+        sigma_t = self._inner.sigma(t_bc)
+
+        if not isinstance(alpha_t, DTensor):
+            alpha_t = DTensor.from_local(
+                alpha_t, device_mesh=mesh, placements=[Replicate()]
+            )
+        if not isinstance(sigma_t, DTensor):
+            sigma_t = DTensor.from_local(
+                sigma_t, device_mesh=mesh, placements=[Replicate()]
+            )
+
+        noise = torch.randn_like(x0)
+        return alpha_t * x0 + sigma_t * noise
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

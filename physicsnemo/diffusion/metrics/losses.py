@@ -42,6 +42,25 @@ def _apply_loss_weight(w: torch.Tensor, data_ndim: int) -> torch.Tensor:
     return w.reshape(*w.shape, *([1] * (data_ndim - w.ndim)))
 
 
+def _maybe_promote_to_mesh(t: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
+    """Promote *t* to a replicated DTensor on *ref*'s device mesh if needed.
+
+    When ``ref`` is a ``ShardTensor`` (or any ``DTensor`` with a device mesh),
+    plain-tensor operands must be promoted to replicated ``DTensor``\\s on the
+    same mesh before element-wise arithmetic, otherwise DTensor dispatch
+    raises a mixed-type error.
+    """
+    mesh = getattr(ref, "device_mesh", None)
+    if mesh is None:
+        return t
+    from torch.distributed.tensor import DTensor
+    from torch.distributed.tensor.placement_types import Replicate
+
+    if isinstance(t, DTensor):
+        return t
+    return DTensor.from_local(t, device_mesh=mesh, placements=[Replicate()])
+
+
 class MSEDSMLoss:
     r"""
     Mean-squared-error denoising score matching loss for training diffusion
@@ -357,7 +376,9 @@ class MSEDSMLoss:
         x0_pred = self._to_x0(prediction, x_t, t)
         loss = (x0_pred - x0) ** 2
         w = self.noise_scheduler.loss_weight(t)
-        loss = _apply_loss_weight(w, x0.ndim) * loss
+        w = _apply_loss_weight(w, x0.ndim)
+        w = _maybe_promote_to_mesh(w, loss)
+        loss = w * loss
         return self._reduce(loss)
 
 
@@ -524,5 +545,7 @@ class WeightedMSEDSMLoss:
         x0_pred = self._to_x0(prediction, x_t, t)
         loss = weight * (x0_pred - x0) ** 2
         w = self.noise_scheduler.loss_weight(t)
-        loss = _apply_loss_weight(w, x0.ndim) * loss
+        w = _apply_loss_weight(w, x0.ndim)
+        w = _maybe_promote_to_mesh(w, loss)
+        loss = w * loss
         return self._reduce(loss)
