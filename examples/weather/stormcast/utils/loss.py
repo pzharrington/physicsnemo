@@ -40,7 +40,6 @@ from physicsnemo.diffusion.noise_schedulers import (
 
 def build_noise_scheduler(
     loss_cfg,
-    device: torch.device,
     logger=None,
 ) -> EDMNoiseScheduler:
     """Create an :class:`~physicsnemo.diffusion.noise_schedulers.EDMNoiseScheduler` from Hydra loss config.
@@ -51,8 +50,6 @@ def build_noise_scheduler(
         Loss config with ``sigma_distribution``, ``sigma_data``, and
         distribution-specific params (``P_mean``/``P_std`` or
         ``sigma_min``/``sigma_max``).
-    device : torch.device
-        Device for any tensor sigma_data.
     logger : optional
         Logger for informational messages.
 

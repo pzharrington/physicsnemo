@@ -494,7 +494,6 @@ class Trainer:
 
         noise_scheduler = build_noise_scheduler(
             loss_params,
-            self.device,
             self.logger,
         )
         noise_scheduler = self.parallel_helper.make_domain_parallel_scheduler(
