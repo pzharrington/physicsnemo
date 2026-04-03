@@ -302,6 +302,11 @@ def diffusion_model_forward(
     """
     if isinstance(condition, TensorDict):
         ref_tensor = condition.get("cond_concat", condition.get("cond_vec"))
+        if ref_tensor is None:
+            raise ValueError(
+                "condition TensorDict must contain 'cond_concat' or 'cond_vec'"
+                "if a TensorDict is passed as condition."
+            )
     else:
         ref_tensor = condition
     if dtype is None:
