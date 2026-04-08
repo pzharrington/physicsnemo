@@ -46,7 +46,7 @@ def _maybe_promote_to_mesh(t: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
     """Promote *t* to a replicated DTensor on *ref*'s device mesh if needed.
 
     When ``ref`` is a ``ShardTensor`` (or any ``DTensor`` with a device mesh),
-    plain-tensor operands must be promoted to replicated ``DTensor``\\s on the
+    plain-tensor operands must be promoted to replicated ``DTensor``s on the
     same mesh before element-wise arithmetic, otherwise DTensor dispatch
     raises a mixed-type error.
     """
