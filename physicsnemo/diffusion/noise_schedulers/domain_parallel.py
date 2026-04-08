@@ -14,11 +14,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Domain-parallel utilities for diffusion training and sampling."""
+"""Domain-parallel noise scheduler for diffusion training and sampling."""
 
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Any, Tuple
 
 import torch
 import torch.distributed as dist
@@ -27,44 +27,98 @@ from torch import Tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import Replicate, Shard
 
+from physicsnemo.diffusion.base import Denoiser
+from physicsnemo.diffusion.noise_schedulers.noise_schedulers import (
+    LinearGaussianNoiseScheduler,
+)
 from physicsnemo.distributed import DistributedManager
 
 
-class DomainParallelSchedulerWrapper:
-    r"""Wrap a noise scheduler for domain-parallel diffusion training and sampling.
+class DomainParallelNoiseScheduler:
+    r"""Domain-parallel noise scheduler for distributed diffusion training and sampling.
+
+    This class implements the
+    :class:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler` protocol by
+    wrapping a :class:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler`
+    and distributing its operations across a domain-parallel device mesh.
 
     In domain-parallel diffusion the spatial domain is split across multiple
-    ranks.  This wrapper ensures that tensors produced by the scheduler are
-    distributed correctly across the domain mesh:
+    ranks.  This scheduler ensures that tensors produced by the underlying
+    noise scheduler are distributed correctly across the domain mesh:
 
     * :meth:`sample_time` — broadcasts sampled times so every shard sees the
       same noise level per batch element (training).
+    * :meth:`add_noise` — promotes scalar :math:`\alpha(t)` and
+      :math:`\sigma(t)` coefficients to replicated ``DTensor``\s so that
+      element-wise operations are type-compatible with sharded data.
+    * :meth:`loss_weight` — delegates to the inner scheduler (loss weights
+      are per-sample scalars, independent of spatial sharding).
     * :meth:`timesteps` — returns a *replicated* tensor on the domain mesh so
       that solver arithmetic with sharded latents is type-compatible
       (sampling).
     * :meth:`init_latents` — returns a *sharded* tensor on the domain mesh,
       split along the chosen spatial dimension (sampling).
+    * :meth:`get_denoiser` — delegates to the inner scheduler's denoiser
+      factory.
 
-    All other scheduler methods (``add_noise``, ``loss_weight``,
-    ``get_denoiser``, etc.) are delegated unchanged to the wrapped scheduler.
+    .. note::
+
+        The inner scheduler must be a
+        :class:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler`
+        because domain-parallel ``add_noise`` requires access to
+        :math:`\alpha(t)` and :math:`\sigma(t)` to construct DTensor-compatible
+        coefficients.
 
     Parameters
     ----------
-    scheduler : NoiseScheduler
-        The inner noise scheduler to wrap.  Any object that implements the
-        :class:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler`
-        protocol.
+    scheduler : LinearGaussianNoiseScheduler
+        The inner noise scheduler to wrap.
     device_mesh : DeviceMesh
         The device mesh defining the domain-parallel group.
     shard_dim : int
         The tensor dimension along which :meth:`init_latents` shards the
         initial latent state.  For example, for ``(B, C, H, W)`` data sharded
         along the height axis, use ``shard_dim=2``.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import torch
+        from torch.distributed.device_mesh import init_device_mesh
+        from physicsnemo.diffusion.noise_schedulers import (
+            DomainParallelNoiseScheduler,
+            EDMNoiseScheduler,
+        )
+        from physicsnemo.diffusion.samplers import sample
+
+        # Create an inner noise scheduler and wrap it for domain parallelism
+        inner = EDMNoiseScheduler()
+        mesh = init_device_mesh("cuda", (world_size,))
+        scheduler = DomainParallelNoiseScheduler(inner, mesh, shard_dim=2)
+
+        # --- Training ---
+        t = scheduler.sample_time(batch_size, device="cuda")  # broadcast
+        x_noisy = scheduler.add_noise(x0_sharded, t)          # DTensor-aware
+        w = scheduler.loss_weight(t)
+
+        # --- Sampling ---
+        t_steps = scheduler.timesteps(num_steps, device="cuda")    # replicated
+        xN = scheduler.init_latents((C, H, W), t_steps[0:1])      # sharded
+        denoiser = scheduler.get_denoiser(x0_predictor=predictor)
+        samples = sample(denoiser, xN, scheduler, num_steps=num_steps)
+
+    See Also
+    --------
+    :class:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler` :
+        The protocol this class implements.
+    :class:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler` :
+        The base class required for the inner scheduler.
     """
 
     def __init__(
         self,
-        scheduler: object,
+        scheduler: LinearGaussianNoiseScheduler,
         device_mesh: DeviceMesh,
         shard_dim: int,
     ) -> None:
@@ -76,7 +130,7 @@ class DomainParallelSchedulerWrapper:
         self._source_rank = dist.get_global_rank(self._group, 0)
 
     @property
-    def inner_scheduler(self) -> object:
+    def inner_scheduler(self) -> LinearGaussianNoiseScheduler:
         """The wrapped noise scheduler."""
         return self._inner
 
@@ -196,9 +250,7 @@ class DomainParallelSchedulerWrapper:
         element-wise operations are type-compatible.
 
         Falls back to the inner scheduler's ``add_noise`` when ``x0`` is a
-        plain tensor or when the inner scheduler does not expose ``sigma``
-        and ``alpha`` methods (i.e. is not a
-        :class:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler`).
+        plain tensor.
 
         Parameters
         ----------
@@ -213,7 +265,7 @@ class DomainParallelSchedulerWrapper:
             Noisy latent state of shape :math:`(B, *)`.
         """
         mesh = getattr(x0, "device_mesh", None)
-        if mesh is None or not hasattr(self._inner, "sigma"):
+        if mesh is None:
             return self._inner.add_noise(x0, time)
 
         from torch.distributed.tensor import DTensor
@@ -233,6 +285,53 @@ class DomainParallelSchedulerWrapper:
 
         noise = torch.randn_like(x0)
         return alpha_t * x0 + sigma_t * noise
+
+    def loss_weight(
+        self,
+        t: Float[Tensor, " N"],
+    ) -> Float[Tensor, "N *channels"]:  # noqa: F821
+        r"""Compute loss weight for denoising score matching training.
+
+        Delegates to the inner scheduler. Loss weights are per-sample scalars
+        (or per-sample-per-channel), independent of spatial sharding.
+
+        Parameters
+        ----------
+        t : Tensor
+            Diffusion time values of shape :math:`(N,)`.
+
+        Returns
+        -------
+        Tensor
+            Loss weight with leading dimension :math:`N`.
+        """
+        return self._inner.loss_weight(t)
+
+    def get_denoiser(
+        self,
+        **kwargs: Any,
+    ) -> Denoiser:
+        r"""Factory that converts a predictor into a denoiser for sampling.
+
+        Delegates to the inner scheduler's
+        :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.get_denoiser`.
+
+        Parameters
+        ----------
+        **kwargs : Any
+            Keyword arguments forwarded to the inner scheduler's
+            ``get_denoiser``. See
+            :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.get_denoiser`
+            for accepted arguments (e.g. ``score_predictor``,
+            ``x0_predictor``, ``denoising_type``).
+
+        Returns
+        -------
+        Denoiser
+            A callable implementing the
+            :class:`~physicsnemo.diffusion.Denoiser` interface.
+        """
+        return self._inner.get_denoiser(**kwargs)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -259,6 +358,3 @@ class DomainParallelSchedulerWrapper:
             global_shape=tensor.shape,
             dtype=tensor.dtype,
         )
-
-    def __getattr__(self, name: str) -> object:
-        return getattr(self._inner, name)

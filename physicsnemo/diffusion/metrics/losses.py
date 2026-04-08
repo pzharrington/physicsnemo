@@ -95,7 +95,7 @@ class MSEDSMLoss:
 
     For domain-parallel training where sampled diffusion times must be
     broadcast across spatial shards, wrap the scheduler with
-    :class:`~physicsnemo.diffusion.DomainParallelSchedulerWrapper` before
+    :class:`~physicsnemo.diffusion.noise_schedulers.DomainParallelNoiseScheduler` before
     passing it here.
 
     The ``model`` argument must satisfy the

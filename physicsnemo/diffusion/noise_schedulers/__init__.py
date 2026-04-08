@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from .domain_parallel import DomainParallelNoiseScheduler  # noqa: F401
 from .noise_schedulers import (  # noqa: F401
     EDMLogUniformNoiseScheduler,
     EDMNoiseScheduler,

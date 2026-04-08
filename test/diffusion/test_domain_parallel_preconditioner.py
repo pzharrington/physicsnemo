@@ -21,7 +21,7 @@ Tests verify the interaction between:
 - ``EDMPreconditioner`` with scalar and per-channel ``sigma_data``
 - FSDP wrapping (which converts registered buffers to replicated DTensors)
 - ``ShardTensor`` inputs for domain-parallel spatial sharding
-- ``MSEDSMLoss`` with ``DomainParallelSchedulerWrapper``
+- ``MSEDSMLoss`` with ``DomainParallelNoiseScheduler``
 - ``sample()`` with domain-parallel scheduler
 
 The distribution patterns follow the following expected pattern:
@@ -32,7 +32,7 @@ The distribution patterns follow the following expected pattern:
    replicated DTensors on that sub-mesh.
 3. Spatial data is distributed as ``ShardTensor`` on the **domain** sub-mesh
    (sharded along height).
-4. The noise scheduler is wrapped with ``DomainParallelSchedulerWrapper`` on
+4. The noise scheduler is wrapped with ``DomainParallelNoiseScheduler`` on
    the **domain** sub-mesh to broadcast sampled times, shard initial
    latents, and promote alpha/sigma coefficients for ``add_noise``
    compatibility.
@@ -62,7 +62,7 @@ from torch.distributed.fsdp import ShardingStrategy
 from torch.distributed.tensor.placement_types import Replicate, Shard
 
 from physicsnemo.core import Module
-from physicsnemo.diffusion.domain_parallel import DomainParallelSchedulerWrapper
+from physicsnemo.diffusion.noise_schedulers import DomainParallelNoiseScheduler
 from physicsnemo.diffusion.metrics.losses import MSEDSMLoss
 from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
 from physicsnemo.diffusion.preconditioners import EDMPreconditioner
@@ -162,7 +162,7 @@ def _make_inputs(device="cuda", seed=42):
 
 def _make_dp_scheduler(sigma_data, domain_mesh):
     scheduler = EDMNoiseScheduler(sigma_data=sigma_data)
-    return DomainParallelSchedulerWrapper(scheduler, domain_mesh, shard_dim=_SHARD_DIM)
+    return DomainParallelNoiseScheduler(scheduler, domain_mesh, shard_dim=_SHARD_DIM)
 
 
 def _dp_mesh_from_config(config_name):
@@ -319,7 +319,7 @@ def test_fsdp_only_training_step(sigma_data):
 #
 # The model is FSDP-wrapped on mesh["ddp"], data is scattered as
 # ShardTensor on mesh["domain"], and the noise scheduler is wrapped
-# with DomainParallelSchedulerWrapper on mesh["domain"].
+# with DomainParallelNoiseScheduler on mesh["domain"].
 #
 # This exercises the full _ensure_plain_tensor + _replicate_on_mesh
 # path: FSDP creates DTensor coefficients on the ddp sub-mesh, which
@@ -483,7 +483,7 @@ def test_dp_scheduler_loss_weight(sigma_data, dp_config):
     """loss_weight through domain-parallel wrapper matches inner scheduler."""
     mesh = _dp_mesh_from_config(dp_config)
     scheduler = EDMNoiseScheduler(sigma_data=sigma_data)
-    dp_scheduler = DomainParallelSchedulerWrapper(
+    dp_scheduler = DomainParallelNoiseScheduler(
         scheduler, mesh["domain"], shard_dim=_SHARD_DIM
     )
 

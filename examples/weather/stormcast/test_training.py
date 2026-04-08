@@ -361,7 +361,7 @@ def test_seeding(
 
       - Domain (model-parallel) groups are {0, 1} and {2, 3}.
         Ranks within the same domain group must see **identical** sigma
-        (enforced by ``DomainParallelSchedulerWrapper`` broadcast).
+        (enforced by ``DomainParallelNoiseScheduler`` broadcast).
       - DDP (data-parallel) groups are {0, 2} and {1, 3}.
         Ranks in different DDP groups must see **different** sigma
         (they process different data and have distinct RNG seeds).
@@ -394,14 +394,14 @@ def test_seeding(
     t = trainer.Trainer(cfg)
 
     # -- instrument the loss to capture sigma values -------------------------
-    from physicsnemo.diffusion.domain_parallel import DomainParallelSchedulerWrapper
+    from physicsnemo.diffusion.noise_schedulers import DomainParallelNoiseScheduler
 
     scheduler = t.loss_fn.noise_scheduler
     if domain_parallel_size > 1 and not isinstance(
-        scheduler, DomainParallelSchedulerWrapper
+        scheduler, DomainParallelNoiseScheduler
     ):
         raise ValueError(
-            "test_seeding requires a DomainParallelSchedulerWrapper on the "
+            "test_seeding requires a DomainParallelNoiseScheduler on the "
             "loss when domain_parallel_size > 1"
         )
     captured_sigmas: list[torch.Tensor] = []

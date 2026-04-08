@@ -275,7 +275,7 @@ def diffusion_model_forward(
 
     For domain-parallel inference, pass a scheduler that has already been
     wrapped with
-    :class:`~physicsnemo.diffusion.DomainParallelSchedulerWrapper` (e.g.
+    :class:`~physicsnemo.diffusion.DomainParallelNoiseScheduler` (e.g.
     via :meth:`~utils.parallel.ParallelHelper.make_domain_parallel_scheduler`).
 
     Parameters

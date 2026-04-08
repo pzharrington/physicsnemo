@@ -21,7 +21,7 @@ Diffusion training uses :class:`~physicsnemo.diffusion.metrics.losses.MSEDSMLoss
 with an :class:`~physicsnemo.diffusion.noise_schedulers.EDMNoiseScheduler` or
 :class:`~physicsnemo.diffusion.noise_schedulers.EDMLogUniformNoiseScheduler`.
 When domain parallelism is active, the caller wraps the scheduler with
-:class:`~physicsnemo.diffusion.DomainParallelSchedulerWrapper` (via
+:class:`~physicsnemo.diffusion.DomainParallelNoiseScheduler` (via
 :meth:`~utils.parallel.ParallelHelper.make_domain_parallel_scheduler`) before
 passing it to the loss so that sampled sigmas are broadcast across spatial
 shards.

@@ -178,3 +178,10 @@ API Reference
     :show-inheritance:
     :members:
     :exclude-members: __init__
+
+:code:`DomainParallelNoiseScheduler`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: physicsnemo.diffusion.noise_schedulers.DomainParallelNoiseScheduler
+    :members:
+    :exclude-members: __init__

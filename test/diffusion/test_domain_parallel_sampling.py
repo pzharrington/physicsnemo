@@ -20,8 +20,8 @@ Non-distributed tests verify the no-op path of ``_maybe_replicate_timesteps``
 and the plain-tensor path through ``sample()``.
 
 Distributed tests (``@pytest.mark.multigpu_static``) verify that
-``DomainParallelSchedulerWrapper.timesteps`` and
-``DomainParallelSchedulerWrapper.init_latents`` produce correctly distributed
+``DomainParallelNoiseScheduler.timesteps`` and
+``DomainParallelNoiseScheduler.init_latents`` produce correctly distributed
 tensors, and that ``sample()`` auto-replicates timesteps when ``xN`` is a
 ``ShardTensor``.
 """
@@ -67,11 +67,11 @@ def test_sample_plain_tensors():
 @pytest.mark.timeout(30)
 @pytest.mark.multigpu_static
 def test_wrapper_timesteps_replicated(distributed_mesh):
-    """DomainParallelSchedulerWrapper.timesteps returns a replicated ShardTensor."""
-    from physicsnemo.diffusion.domain_parallel import DomainParallelSchedulerWrapper
+    """DomainParallelNoiseScheduler.timesteps returns a replicated ShardTensor."""
+    from physicsnemo.diffusion.noise_schedulers import DomainParallelNoiseScheduler
 
     scheduler = EDMNoiseScheduler()
-    wrapper = DomainParallelSchedulerWrapper(scheduler, distributed_mesh)
+    wrapper = DomainParallelNoiseScheduler(scheduler, distributed_mesh)
 
     t_steps = wrapper.timesteps(10, device="cuda")
 
@@ -85,11 +85,11 @@ def test_wrapper_timesteps_replicated(distributed_mesh):
 @pytest.mark.timeout(30)
 @pytest.mark.multigpu_static
 def test_wrapper_init_latents_sharded(distributed_mesh):
-    """DomainParallelSchedulerWrapper.init_latents returns a sharded tensor."""
-    from physicsnemo.diffusion.domain_parallel import DomainParallelSchedulerWrapper
+    """DomainParallelNoiseScheduler.init_latents returns a sharded tensor."""
+    from physicsnemo.diffusion.noise_schedulers import DomainParallelNoiseScheduler
 
     scheduler = EDMNoiseScheduler()
-    wrapper = DomainParallelSchedulerWrapper(
+    wrapper = DomainParallelNoiseScheduler(
         scheduler,
         distributed_mesh,
         shard_dim=2,
@@ -106,10 +106,10 @@ def test_wrapper_init_latents_sharded(distributed_mesh):
 @pytest.mark.multigpu_static
 def test_sample_auto_replicates_timesteps(distributed_mesh):
     """sample() auto-replicates plain timesteps when xN is a ShardTensor."""
-    from physicsnemo.diffusion.domain_parallel import DomainParallelSchedulerWrapper
+    from physicsnemo.diffusion.noise_schedulers import DomainParallelNoiseScheduler
 
     scheduler = EDMNoiseScheduler()
-    wrapper = DomainParallelSchedulerWrapper(
+    wrapper = DomainParallelNoiseScheduler(
         scheduler,
         distributed_mesh,
         shard_dim=2,
@@ -126,10 +126,10 @@ def test_sample_auto_replicates_timesteps(distributed_mesh):
 @pytest.mark.multigpu_static
 def test_sample_with_wrapper_timesteps(distributed_mesh):
     """sample() works when both xN and time_steps come from the wrapper."""
-    from physicsnemo.diffusion.domain_parallel import DomainParallelSchedulerWrapper
+    from physicsnemo.diffusion.noise_schedulers import DomainParallelNoiseScheduler
 
     scheduler = EDMNoiseScheduler()
-    wrapper = DomainParallelSchedulerWrapper(
+    wrapper = DomainParallelNoiseScheduler(
         scheduler,
         distributed_mesh,
         shard_dim=2,

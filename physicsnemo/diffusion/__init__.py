@@ -15,4 +15,6 @@
 # limitations under the License.
 
 from .base import Denoiser, DiffusionModel, Predictor  # noqa: F401
-from .domain_parallel import DomainParallelSchedulerWrapper  # noqa: F401
+from .noise_schedulers.domain_parallel import (  # noqa: F401
+    DomainParallelNoiseScheduler,
+)
