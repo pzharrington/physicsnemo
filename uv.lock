@@ -294,8 +294,8 @@ name = "astunparse"
 version = "1.6.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "six", marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or extra == 'extra-18-nvidia-physicsnemo-cu13' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
-    { name = "wheel", marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or extra == 'extra-18-nvidia-physicsnemo-cu13' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
+    { name = "six" },
+    { name = "wheel" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f3/af/4182184d3c338792894f34a62672919db7ca008c89abee9b564dd34d8029/astunparse-1.6.3.tar.gz", hash = "sha256:5ad93a8456f0d084c3456d059fd9a92cce667963232cbf763eac3bc5b7940872", size = 18290, upload-time = "2019-12-22T18:12:13.129Z" }
 wheels = [
@@ -988,7 +988,7 @@ name = "cuda-core"
 version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or extra == 'extra-18-nvidia-physicsnemo-cu13' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
+    { name = "numpy" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7a/69/8361fa2873fdc86d298a01f70ca3ea4a13f59711e75312dd0ce3d411c05f/cuda_core-0.6.0-cp311-cp311-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:70c3cd2ae0fa82cd6681be636051b247bcd4c4c3249c35bd982034cefb5adca3", size = 21597027, upload-time = "2026-02-23T18:59:24.216Z" },
@@ -1545,10 +1545,10 @@ name = "dm-tree"
 version = "0.1.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "absl-py", marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or extra == 'extra-18-nvidia-physicsnemo-cu13' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
-    { name = "attrs", marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or extra == 'extra-18-nvidia-physicsnemo-cu13' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
-    { name = "numpy", marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or extra == 'extra-18-nvidia-physicsnemo-cu13' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
-    { name = "wrapt", marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or extra == 'extra-18-nvidia-physicsnemo-cu13' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
+    { name = "absl-py" },
+    { name = "attrs" },
+    { name = "numpy" },
+    { name = "wrapt" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a6/83/ce29720ccf934c6cfa9b9c95ebbe96558386e66886626066632b5e44afed/dm_tree-0.1.9.tar.gz", hash = "sha256:a4c7db3d3935a5a2d5e4b383fc26c6b0cd6f78c6d4605d3e7b518800ecd5342b", size = 35623, upload-time = "2025-01-30T20:45:37.13Z" }
 wheels = [
@@ -1612,6 +1612,50 @@ sdist = { url = "https://files.pythonhosted.org/packages/25/71/80cc718ff6d7abfba
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0c/d5/c5db1ea3394c6e1732fb3286b3bd878b59507a8f77d32a2cebda7d7b7cd4/donfig-0.8.1.post1-py3-none-any.whl", hash = "sha256:2a3175ce74a06109ff9307d90a230f81215cbac9a751f4d1c6194644b8204f9d", size = 21592, upload-time = "2024-05-23T14:13:55.283Z" },
 ]
+
+[[package]]
+name = "earth2grid"
+version = "2025.11.1+torch210"
+source = { url = "https://github.com/NVlabs/earth2grid/archive/8fdff5a78d324f8d25afe224915301b3169bffe2.tar.gz" }
+dependencies = [
+    { name = "einops" },
+    { name = "numpy" },
+    { name = "scipy" },
+    { name = "torch", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-18-nvidia-physicsnemo-cu12' and extra == 'extra-18-nvidia-physicsnemo-cu13') or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13') or (extra != 'extra-18-nvidia-physicsnemo-cu12' and extra != 'extra-18-nvidia-physicsnemo-cu13')" },
+    { name = "torch", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
+    { name = "torch", version = "2.10.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "extra == 'extra-18-nvidia-physicsnemo-cu13' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
+]
+sdist = { hash = "sha256:55f54084fd6a1fa505b68a2ab067aba7cab76f94d158dc8720dbb15c4e3ac235" }
+
+[package.metadata]
+requires-dist = [
+    { name = "black", marker = "extra == 'test'", specifier = ">=21.5b2" },
+    { name = "bump2version", marker = "extra == 'dev'", specifier = ">=1.0.1" },
+    { name = "coverage", marker = "extra == 'test'", specifier = ">=7.0.0" },
+    { name = "einops", specifier = ">=0.7.0" },
+    { name = "flake8", marker = "extra == 'test'", specifier = ">=3.9.2" },
+    { name = "flake8-docstrings", marker = "extra == 'test'", specifier = ">=1.6.0" },
+    { name = "isort", marker = "extra == 'test'", specifier = ">=5.8.0" },
+    { name = "matplotlib", marker = "extra == 'test'" },
+    { name = "matplotlib", marker = "extra == 'viz'" },
+    { name = "mypy", marker = "extra == 'test'", specifier = ">=0.900" },
+    { name = "netcdf4", marker = "extra == 'all'", specifier = ">=1.6.5" },
+    { name = "numpy", specifier = ">=1.23.3" },
+    { name = "pip", marker = "extra == 'dev'", specifier = ">=20.3.1" },
+    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=2.12.0" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=6.2.4" },
+    { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=2.12.0" },
+    { name = "pytest-regtest", marker = "extra == 'test'", specifier = ">=1.5.1,<2" },
+    { name = "pyvista", marker = "extra == 'viz'", specifier = ">=0.43.2" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.5" },
+    { name = "scipy" },
+    { name = "toml", marker = "extra == 'dev'", specifier = ">=0.10.2" },
+    { name = "torch", specifier = ">=2.10,<2.11" },
+    { name = "tox", marker = "extra == 'dev'", specifier = ">=3.20.1" },
+    { name = "twine", marker = "extra == 'dev'", specifier = ">=3.3.0" },
+    { name = "virtualenv", marker = "extra == 'dev'", specifier = ">=20.2.2" },
+]
+provides-extras = ["all", "viz", "test", "dev"]
 
 [[package]]
 name = "einops"
@@ -3311,8 +3355,8 @@ name = "numba"
 version = "0.61.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "llvmlite", marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or extra == 'extra-18-nvidia-physicsnemo-cu13' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
-    { name = "numpy", marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or extra == 'extra-18-nvidia-physicsnemo-cu13' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
+    { name = "llvmlite" },
+    { name = "numpy" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/a0/e21f57604304aa03ebb8e098429222722ad99176a4f979d34af1d1ee80da/numba-0.61.2.tar.gz", hash = "sha256:8750ee147940a6637b80ecf7f95062185ad8726c8c28a2295b8ec1160a196f7d", size = 2820615, upload-time = "2025-04-09T02:58:07.659Z" }
 wheels = [
@@ -3341,9 +3385,9 @@ dependencies = [
     { name = "cuda-bindings", version = "12.9.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
     { name = "cuda-bindings", version = "13.0.3", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-18-nvidia-physicsnemo-cu13') or (sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13') or (sys_platform == 'emscripten' and extra == 'extra-18-nvidia-physicsnemo-cu12' and extra == 'extra-18-nvidia-physicsnemo-cu13') or (sys_platform == 'emscripten' and extra == 'extra-18-nvidia-physicsnemo-cu13' and extra == 'extra-18-nvidia-physicsnemo-natten-cu12') or (sys_platform == 'emscripten' and extra == 'extra-18-nvidia-physicsnemo-cu13' and extra != 'extra-18-nvidia-physicsnemo-natten-cu13') or (sys_platform == 'emscripten' and extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13') or (sys_platform == 'win32' and extra == 'extra-18-nvidia-physicsnemo-cu12' and extra == 'extra-18-nvidia-physicsnemo-cu13') or (sys_platform == 'win32' and extra == 'extra-18-nvidia-physicsnemo-cu13' and extra == 'extra-18-nvidia-physicsnemo-natten-cu12') or (sys_platform == 'win32' and extra == 'extra-18-nvidia-physicsnemo-cu13' and extra != 'extra-18-nvidia-physicsnemo-natten-cu13') or (sys_platform == 'win32' and extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
     { name = "cuda-bindings", version = "13.2.0", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13') or (sys_platform == 'emscripten' and extra == 'extra-18-nvidia-physicsnemo-cu13' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13') or (sys_platform == 'emscripten' and extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13') or (sys_platform == 'win32' and extra == 'extra-18-nvidia-physicsnemo-cu13' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13') or (sys_platform == 'win32' and extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13') or (extra == 'extra-18-nvidia-physicsnemo-cu12' and extra == 'extra-18-nvidia-physicsnemo-cu13') or (extra == 'extra-18-nvidia-physicsnemo-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
-    { name = "cuda-core", marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or extra == 'extra-18-nvidia-physicsnemo-cu13' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
-    { name = "numba", marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or extra == 'extra-18-nvidia-physicsnemo-cu13' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
-    { name = "packaging", marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or extra == 'extra-18-nvidia-physicsnemo-cu13' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
+    { name = "cuda-core" },
+    { name = "numba" },
+    { name = "packaging" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/aa/cd/9017506815047ee30ad404e3c469788676a6abeaaff8014d07a0180cdfbc/numba_cuda-0.22.2.tar.gz", hash = "sha256:e8c19bc1174dfc3596259381fa708f1c3397a618bdbbaa5d068bcc56af8fd921", size = 1340447, upload-time = "2025-12-19T01:08:57.73Z" }
 wheels = [
@@ -4661,6 +4705,16 @@ gnns = [
     { name = "vtk" },
     { name = "wandb" },
 ]
+healda = [
+    { name = "dask" },
+    { name = "earth2grid" },
+    { name = "netcdf4" },
+    { name = "pyarrow" },
+    { name = "tensordict" },
+    { name = "tfrecord" },
+    { name = "xarray" },
+    { name = "zarr" },
+]
 mesh-extras = [
     { name = "matplotlib" },
     { name = "pyacvd" },
@@ -4726,6 +4780,8 @@ requires-dist = [
     { name = "cupy-cuda12x", marker = "extra == 'cu12'" },
     { name = "cupy-cuda13x", marker = "extra == 'cu13'", specifier = "==13.6.0" },
     { name = "dask", marker = "extra == 'datapipes-extras'" },
+    { name = "dask", marker = "extra == 'healda'" },
+    { name = "earth2grid", marker = "extra == 'healda'", url = "https://github.com/NVlabs/earth2grid/archive/8fdff5a78d324f8d25afe224915301b3169bffe2.tar.gz" },
     { name = "einops", specifier = ">=0.8.1" },
     { name = "gitpython", specifier = ">=3.1.40" },
     { name = "h5py", specifier = ">=3.15.1" },
@@ -4744,6 +4800,7 @@ requires-dist = [
     { name = "natten", marker = "extra == 'natten-cu12'", specifier = ">=0.21.5", index = "https://whl.natten.org/cu128/torch2.10.0", conflict = { package = "nvidia-physicsnemo", extra = "natten-cu12" } },
     { name = "natten", marker = "extra == 'natten-cu13'", specifier = ">=0.21.5", index = "https://whl.natten.org/cu130/torch2.10.0", conflict = { package = "nvidia-physicsnemo", extra = "natten-cu13" } },
     { name = "netcdf4", marker = "extra == 'datapipes-extras'" },
+    { name = "netcdf4", marker = "extra == 'healda'" },
     { name = "numpy", specifier = ">=1.22.4" },
     { name = "nvidia-dali-cuda120", marker = "extra == 'cu12'", index = "https://pypi.nvidia.com/" },
     { name = "nvidia-dali-cuda130", marker = "extra == 'cu13'", index = "https://pypi.nvidia.com/" },
@@ -4753,6 +4810,7 @@ requires-dist = [
     { name = "packaging", specifier = ">=24.2" },
     { name = "pandas", specifier = ">=2.2.0" },
     { name = "pyacvd", marker = "extra == 'mesh-extras'", specifier = ">=0.3.2" },
+    { name = "pyarrow", marker = "extra == 'healda'", specifier = ">=14.0.0" },
     { name = "pylibraft-cu12", marker = "extra == 'cu12'", index = "https://pypi.nvidia.com/" },
     { name = "pylibraft-cu13", marker = "extra == 'cu13'", index = "https://pypi.nvidia.com/" },
     { name = "pyvista", marker = "extra == 'gnns'", specifier = ">=0.46.4" },
@@ -4769,8 +4827,10 @@ requires-dist = [
     { name = "stl", marker = "extra == 'utils-extras'" },
     { name = "tensordict", specifier = ">=0.10.0" },
     { name = "tensordict", marker = "extra == 'datapipes-extras'", specifier = ">=0.11.0" },
+    { name = "tensordict", marker = "extra == 'healda'", specifier = ">=0.11.0" },
     { name = "termcolor", specifier = ">=3.2.0" },
     { name = "tfrecord", marker = "extra == 'datapipes-extras'" },
+    { name = "tfrecord", marker = "extra == 'healda'" },
     { name = "timm", specifier = ">=1.0.22" },
     { name = "torch", specifier = ">=2.5.0" },
     { name = "torch", marker = "extra == 'cu12'", specifier = ">=2.5.0", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "nvidia-physicsnemo", extra = "cu12" } },
@@ -4796,9 +4856,11 @@ requires-dist = [
     { name = "wandb", marker = "extra == 'utils-extras'" },
     { name = "warp-lang", specifier = ">=1.5.0" },
     { name = "xarray", marker = "extra == 'datapipes-extras'", specifier = ">=2025.6.1" },
+    { name = "xarray", marker = "extra == 'healda'", specifier = ">=2025.6.1" },
     { name = "zarr", marker = "extra == 'datapipes-extras'", specifier = ">=3.0.0" },
+    { name = "zarr", marker = "extra == 'healda'", specifier = ">=3.0.0" },
 ]
-provides-extras = ["cu12", "cu13", "datapipes-extras", "gnns", "mesh-extras", "model-extras", "natten-cu12", "natten-cu13", "nn-extras", "perf", "utils-extras"]
+provides-extras = ["cu12", "cu13", "datapipes-extras", "gnns", "healda", "mesh-extras", "model-extras", "natten-cu12", "natten-cu13", "nn-extras", "perf", "utils-extras"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -6531,18 +6593,18 @@ dependencies = [
     { name = "typing-extensions", marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
 ]
 wheels = [
-    { url = "https://download.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:85ed7944655ea6fd69377692e9cbfd7bba28d99696ceae79985e7caa99cf0a95" },
-    { url = "https://download.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:1d01ffaebf64715c0f507a39463149cb19e596ff702bd4bcf862601f2881dabc" },
-    { url = "https://download.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp311-cp311-win_amd64.whl", hash = "sha256:3523fda6e2cfab2b04ae09b1424681358e508bb3faa11ceb67004113d5e7acad" },
-    { url = "https://download.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:6f09cdf2415516be028ae82e6b985bcfc3eac37bc52ab401142689f6224516ca" },
-    { url = "https://download.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:628e89bd5110ced7debee2a57c69959725b7fbc64eab81a39dd70e46c7e28ba5" },
-    { url = "https://download.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp312-cp312-win_amd64.whl", hash = "sha256:fbde8f6a9ec8c76979a0d14df21c10b9e5cab6f0d106a73ca73e2179bc597cae" },
-    { url = "https://download.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:bdbcc703382f948e951c063448c9406bf38ce66c41dd698d9e2733fcf96c037a" },
-    { url = "https://download.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:7b4bd23ed63de97456fcc81c26fea9f02ee02ce1112111c4dac0d8cfe574b23e" },
-    { url = "https://download.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp313-cp313-win_amd64.whl", hash = "sha256:4d1b0b49c54223c7c04050b49eac141d77b6edbc34aea1dfc74a6fdb661baa8c" },
-    { url = "https://download.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp313-cp313t-manylinux_2_28_aarch64.whl", hash = "sha256:f1f8b840c64b645a4bc61a393db48effb9c92b2dc26c8373873911f0750d1ea7" },
-    { url = "https://download.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp313-cp313t-manylinux_2_28_x86_64.whl", hash = "sha256:23f58258012bcf1c349cb22af387e33aadca7f83ea617b080e774eb41e4fe8ff" },
-    { url = "https://download.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp313-cp313t-win_amd64.whl", hash = "sha256:01b216e097b17a5277cfb47c383cdcacf06abeadcb0daca0c76b59e72854c3b6" },
+    { url = "https://download-r2.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:85ed7944655ea6fd69377692e9cbfd7bba28d99696ceae79985e7caa99cf0a95" },
+    { url = "https://download-r2.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:1d01ffaebf64715c0f507a39463149cb19e596ff702bd4bcf862601f2881dabc" },
+    { url = "https://download-r2.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp311-cp311-win_amd64.whl", hash = "sha256:3523fda6e2cfab2b04ae09b1424681358e508bb3faa11ceb67004113d5e7acad" },
+    { url = "https://download-r2.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:6f09cdf2415516be028ae82e6b985bcfc3eac37bc52ab401142689f6224516ca" },
+    { url = "https://download-r2.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:628e89bd5110ced7debee2a57c69959725b7fbc64eab81a39dd70e46c7e28ba5" },
+    { url = "https://download-r2.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp312-cp312-win_amd64.whl", hash = "sha256:fbde8f6a9ec8c76979a0d14df21c10b9e5cab6f0d106a73ca73e2179bc597cae" },
+    { url = "https://download-r2.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:bdbcc703382f948e951c063448c9406bf38ce66c41dd698d9e2733fcf96c037a" },
+    { url = "https://download-r2.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:7b4bd23ed63de97456fcc81c26fea9f02ee02ce1112111c4dac0d8cfe574b23e" },
+    { url = "https://download-r2.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp313-cp313-win_amd64.whl", hash = "sha256:4d1b0b49c54223c7c04050b49eac141d77b6edbc34aea1dfc74a6fdb661baa8c" },
+    { url = "https://download-r2.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp313-cp313t-manylinux_2_28_aarch64.whl", hash = "sha256:f1f8b840c64b645a4bc61a393db48effb9c92b2dc26c8373873911f0750d1ea7" },
+    { url = "https://download-r2.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp313-cp313t-manylinux_2_28_x86_64.whl", hash = "sha256:23f58258012bcf1c349cb22af387e33aadca7f83ea617b080e774eb41e4fe8ff" },
+    { url = "https://download-r2.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp313-cp313t-win_amd64.whl", hash = "sha256:01b216e097b17a5277cfb47c383cdcacf06abeadcb0daca0c76b59e72854c3b6" },
 ]
 
 [[package]]
@@ -6625,18 +6687,18 @@ dependencies = [
     { name = "typing-extensions", marker = "extra == 'extra-18-nvidia-physicsnemo-cu13' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
 ]
 wheels = [
-    { url = "https://download.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:ea3239d544b2e569a8f47db5c7fa4fd42a2fe96aefb84bb1eda45ce213020fd2" },
-    { url = "https://download.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:22cfa45e73f1e8c64f4012737987a727d01d152121b93d196b0ca22f39a3f8e3" },
-    { url = "https://download.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp311-cp311-win_amd64.whl", hash = "sha256:218ae0f323d5ebe8f2770e46cbfb7bbff9af2c8d192d5187878d0964d43c8b71" },
-    { url = "https://download.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:4fc8f67637f4c92b989a07d80ffe755e79a3510ca02ebf23ce66396fb277c88d" },
-    { url = "https://download.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:858f0cbcc78d726fea9499eb3464faa98392fa093845a3262209bd226b7844d6" },
-    { url = "https://download.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp312-cp312-win_amd64.whl", hash = "sha256:224649fa0ab181ec483cc368e3303dda1760e4ba31bea806b88979f855436aaa" },
-    { url = "https://download.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:75780283308df9fede371eeda01e9607c8862a1803a2f2f31a08a2c0deaed342" },
-    { url = "https://download.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:7e0d9922e9e91f780b2761a0c5ebac3c15c9740bab042e1b59149afa6d6474eb" },
-    { url = "https://download.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp313-cp313-win_amd64.whl", hash = "sha256:48af94af745a9dd9b42be81ea15b56aba981666bcfe10394dceca6d9476a50fa" },
-    { url = "https://download.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp313-cp313t-manylinux_2_28_aarch64.whl", hash = "sha256:46699da91f0367d8dfa1b606cb0352aaf190b5853f463010e75ff08f15a94e7d" },
-    { url = "https://download.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp313-cp313t-manylinux_2_28_x86_64.whl", hash = "sha256:775d1fff07e302fb669d555a5005f781aa460aa80dff7a512e8e6e723f9def83" },
-    { url = "https://download.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp313-cp313t-win_amd64.whl", hash = "sha256:b38e5b505b015903a51c2b3f12e50a9f152f92fe7e3992e79f504138cf90601d" },
+    { url = "https://download-r2.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:ea3239d544b2e569a8f47db5c7fa4fd42a2fe96aefb84bb1eda45ce213020fd2" },
+    { url = "https://download-r2.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:22cfa45e73f1e8c64f4012737987a727d01d152121b93d196b0ca22f39a3f8e3" },
+    { url = "https://download-r2.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp311-cp311-win_amd64.whl", hash = "sha256:218ae0f323d5ebe8f2770e46cbfb7bbff9af2c8d192d5187878d0964d43c8b71" },
+    { url = "https://download-r2.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:4fc8f67637f4c92b989a07d80ffe755e79a3510ca02ebf23ce66396fb277c88d" },
+    { url = "https://download-r2.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:858f0cbcc78d726fea9499eb3464faa98392fa093845a3262209bd226b7844d6" },
+    { url = "https://download-r2.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp312-cp312-win_amd64.whl", hash = "sha256:224649fa0ab181ec483cc368e3303dda1760e4ba31bea806b88979f855436aaa" },
+    { url = "https://download-r2.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:75780283308df9fede371eeda01e9607c8862a1803a2f2f31a08a2c0deaed342" },
+    { url = "https://download-r2.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:7e0d9922e9e91f780b2761a0c5ebac3c15c9740bab042e1b59149afa6d6474eb" },
+    { url = "https://download-r2.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp313-cp313-win_amd64.whl", hash = "sha256:48af94af745a9dd9b42be81ea15b56aba981666bcfe10394dceca6d9476a50fa" },
+    { url = "https://download-r2.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp313-cp313t-manylinux_2_28_aarch64.whl", hash = "sha256:46699da91f0367d8dfa1b606cb0352aaf190b5853f463010e75ff08f15a94e7d" },
+    { url = "https://download-r2.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp313-cp313t-manylinux_2_28_x86_64.whl", hash = "sha256:775d1fff07e302fb669d555a5005f781aa460aa80dff7a512e8e6e723f9def83" },
+    { url = "https://download-r2.pytorch.org/whl/cu130/torch-2.10.0%2Bcu130-cp313-cp313t-win_amd64.whl", hash = "sha256:b38e5b505b015903a51c2b3f12e50a9f152f92fe7e3992e79f504138cf90601d" },
 ]
 
 [[package]]
@@ -6924,9 +6986,9 @@ name = "treelite"
 version = "4.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or extra == 'extra-18-nvidia-physicsnemo-cu13' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
-    { name = "packaging", marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or extra == 'extra-18-nvidia-physicsnemo-cu13' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
-    { name = "scipy", marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or extra == 'extra-18-nvidia-physicsnemo-cu13' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "scipy" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9e/dd/78886789f87a6d9cb3d78241fdd750c13123ea4c64df03bcc717ee5b5d26/treelite-4.7.0.tar.gz", hash = "sha256:6d1a0d990f4972e77bad6b42a6e0b7d68527d790564bd42d7d8d48ae1f14dc4c", size = 110239, upload-time = "2026-03-06T23:25:38.477Z" }
 wheels = [
@@ -7146,7 +7208,7 @@ name = "wheel"
 version = "0.46.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "packaging", marker = "extra == 'extra-18-nvidia-physicsnemo-cu12' or extra == 'extra-18-nvidia-physicsnemo-cu13' or (extra == 'extra-18-nvidia-physicsnemo-natten-cu12' and extra == 'extra-18-nvidia-physicsnemo-natten-cu13')" },
+    { name = "packaging" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/89/24/a2eb353a6edac9a0303977c4cb048134959dd2a51b48a269dfc9dde00c8a/wheel-0.46.3.tar.gz", hash = "sha256:e3e79874b07d776c40bd6033f8ddf76a7dad46a7b8aa1b2787a83083519a1803", size = 60605, upload-time = "2026-01-22T12:39:49.136Z" }
 wheels = [

@@ -1,11 +1,12 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2023 - 2026 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-# http://www.apache.org/licenses/LICENSE-2.0
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,16 +20,20 @@ using ``asyncio.gather``.  It is used by ``ERA5Loader`` to read ERA5 data
 from zarr stores.
 """
 
+from __future__ import annotations
+
 import asyncio
 import urllib.parse
 
 import cftime
 import numpy as np
 import pandas as pd
-import xarray as xr
-import zarr
-import zarr.storage
-from zarr.core.sync import sync
+
+from physicsnemo.core.version_check import OptionalImport
+
+xr = OptionalImport("xarray")
+zarr = OptionalImport("zarr")
+_zarr_sync = OptionalImport("zarr.core.sync")
 
 NO_LEVEL = -1  # sentinel for 2D (surface) variables that lack a pressure level
 
@@ -83,7 +88,7 @@ class ZarrLoader:
         if isinstance(path, str) and _is_local(path):
             storage_options = None
 
-        self.group = sync(
+        self.group = _zarr_sync.sync(
             zarr.api.asynchronous.open_group(
                 path,
                 storage_options=storage_options,
@@ -93,12 +98,12 @@ class ZarrLoader:
         )
 
         if self.variables_3d:
-            self.inds = sync(self._get_vertical_indices(level_coord_name, levels))
+            self.inds = _zarr_sync.sync(self._get_vertical_indices(level_coord_name, levels))
 
         self._arrays = {}
         self._has_time = bool(self.variables_3d or self.variables_2d)
         if self._has_time:
-            time_num, self.units, self.calendar = sync(self._get_time())
+            time_num, self.units, self.calendar = _zarr_sync.sync(self._get_time())
             if np.issubdtype(time_num.dtype, np.datetime64):
                 self.times = pd.DatetimeIndex(time_num)
             else:

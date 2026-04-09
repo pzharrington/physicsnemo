@@ -1,11 +1,12 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2023 - 2026 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-# http://www.apache.org/licenses/LICENSE-2.0
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,14 +21,22 @@ from physicsnemo.experimental.datapipes.healda.configs.combined_schema import (
     get_channel_table_schema,
     get_combined_observation_schema,
 )
-from physicsnemo.experimental.datapipes.healda.configs.sensors import SENSOR_CONFIGS, SENSOR_NAME_TO_ID
+from physicsnemo.experimental.datapipes.healda.configs.sensors import (
+    SENSOR_CONFIGS,
+    SENSOR_NAME_TO_ID,
+)
 
 
 def test_combined_schema_has_required_fields():
     schema = get_combined_observation_schema()
     required = [
-        "Latitude", "Longitude", "Absolute_Obs_Time", "DA_window",
-        "Platform_ID", "Observation", "Global_Channel_ID",
+        "Latitude",
+        "Longitude",
+        "Absolute_Obs_Time",
+        "DA_window",
+        "Platform_ID",
+        "Observation",
+        "Global_Channel_ID",
     ]
     for name in required:
         assert name in schema.names, f"Missing required field: {name}"

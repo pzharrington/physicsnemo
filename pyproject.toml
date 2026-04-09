@@ -75,6 +75,7 @@ conflicts = [
 torch-sparse = ["torch"]
 torch-cluster = ["torch"]
 torch-scatter = ["torch"]
+earth2grid = ["setuptools", "torch"]
 
 [[tool.uv.index]]
 name = "nvidia"
@@ -144,6 +145,8 @@ natten = [
     { index = "natten-cu128-whl", extra = "natten-cu12" },
     { index = "natten-cu130-whl", extra = "natten-cu13" },
 ]
+
+earth2grid = { url = "https://github.com/NVlabs/earth2grid/archive/8fdff5a78d324f8d25afe224915301b3169bffe2.tar.gz" }
 
 #####################################################################
 # Flags Controlling the local build of physicsnemo
@@ -278,6 +281,12 @@ gnns = [
 
 perf = [
     "transformer_engine[pytorch]",
+]
+
+healda = [
+    "nvidia-physicsnemo[datapipes-extras]",
+    "pyarrow>=14.0.0",
+    "earth2grid",
 ]
 
 
