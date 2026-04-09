@@ -1283,7 +1283,7 @@ class EDMLogUniformNoiseScheduler(EDMNoiseScheduler):
     >>> t = scheduler.sample_time(8)
     >>> t.shape
     torch.Size([8])
-    >>> (t >= 0.002).all() and (t <= 80.0).all()
+    >>> ((t >= 0.002).all() and (t <= 80.0).all()).item()
     True
 
     Per-channel ``sigma_data`` works the same as :class:`EDMNoiseScheduler`:
