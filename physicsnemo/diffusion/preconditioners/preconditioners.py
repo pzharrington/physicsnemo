@@ -20,6 +20,7 @@ from collections.abc import Sequence
 from typing import Any, Tuple
 
 import torch
+from jaxtyping import Float
 from tensordict import TensorDict
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.placement_types import Replicate
@@ -442,6 +443,14 @@ class BaseAffinePreconditioner(Module, ABC):
         """
         return t
 
+    def _validate_input(self, x: torch.Tensor) -> None:
+        """Subclass hook for additional input validation.
+
+        Called inside the ``torch.compiler.is_compiling()`` guard in
+        :meth:`forward`, so it is skipped during ``torch.compile``
+        tracing.  The default implementation is a no-op.
+        """
+
     def forward(
         self,
         x: torch.Tensor,
@@ -468,6 +477,7 @@ class BaseAffinePreconditioner(Module, ABC):
                         f"Condition tensor has batch size {condition.shape[0]} "
                         f"but expected {B} to match x."
                     )
+            self._validate_input(x)
 
         # Map time step to noise level via sigma method
         sigma_t = self.sigma(t).reshape(-1, *([1] * (x.ndim - 1)))
@@ -1019,7 +1029,7 @@ class EDMPreconditioner(BaseAffinePreconditioner):
     def __init__(
         self,
         model: Module,
-        sigma_data: float | Sequence[float] | torch.Tensor = 0.5,
+        sigma_data: float | Sequence[float] | Float[torch.Tensor, " C"] = 0.5,
     ) -> None:
         super().__init__(model)
         if isinstance(sigma_data, torch.Tensor):
@@ -1031,6 +1041,31 @@ class EDMPreconditioner(BaseAffinePreconditioner):
         if sd.ndim > 0 and sd.numel() == 1:
             sd = sd.squeeze()
         self.register_buffer("sigma_data", sd)
+        # Store the number of channels for per-channel sigma_data so that
+        # validation in forward() can check against x without reading
+        # sigma_data.ndim at runtime (which could cause a graph break).
+        self._sigma_data_channels: int = sd.numel() if sd.ndim > 0 else 0
+
+    def _validate_input(self, x: torch.Tensor) -> None:
+        C = self._sigma_data_channels
+        if C > 0 and x.ndim >= 2 and x.shape[1] != C:
+            raise ValueError(
+                f"EDMPreconditioner has per-channel sigma_data with "
+                f"{C} channels, but input x has {x.shape[1]} channels "
+                f"(shape {tuple(x.shape)})."
+            )
+
+    def _reshape_sigma_data(self, t: torch.Tensor) -> torch.Tensor:
+        """Reshape ``sigma_data`` for broadcasting against *t*.
+
+        For scalar ``sigma_data`` this is a no-op.  For per-channel
+        ``sigma_data`` of shape ``(C,)`` the result is
+        ``(1, C, 1, ..., 1)`` matching the spatial dims of *t*.
+        """
+        sd = self.sigma_data
+        if self._sigma_data_channels > 0:
+            sd = sd.view(1, -1, *([1] * (t.ndim - 2)))
+        return sd
 
     def compute_coefficients(
         self, t: torch.Tensor
@@ -1056,10 +1091,7 @@ class EDMPreconditioner(BaseAffinePreconditioner):
             :math:`(B, C, 1, ..., 1)` while :math:`c_{\text{noise}}`
             remains :math:`(B, 1, ..., 1)`.
         """
-        sd = self.sigma_data
-        if sd.ndim > 0:
-            # Per-channel: reshape (C,) → (1, C, 1, ..., 1) for broadcasting
-            sd = sd.view(1, -1, *([1] * (t.ndim - 2)))
+        sd = self._reshape_sigma_data(t)
         c_skip = sd**2 / (t**2 + sd**2)
         c_out = t * sd / (t**2 + sd**2).sqrt()
         c_in = 1 / (sd**2 + t**2).sqrt()

@@ -62,9 +62,11 @@ from torch.distributed.fsdp import ShardingStrategy
 from torch.distributed.tensor.placement_types import Replicate, Shard
 
 from physicsnemo.core import Module
-from physicsnemo.diffusion.noise_schedulers import DomainParallelNoiseScheduler
 from physicsnemo.diffusion.metrics.losses import MSEDSMLoss
-from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
+from physicsnemo.diffusion.noise_schedulers import (
+    DomainParallelNoiseScheduler,
+    EDMNoiseScheduler,
+)
 from physicsnemo.diffusion.preconditioners import EDMPreconditioner
 from physicsnemo.diffusion.samplers import sample
 from physicsnemo.domain_parallel.shard_tensor import scatter_tensor

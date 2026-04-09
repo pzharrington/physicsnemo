@@ -17,16 +17,16 @@
 """Multi-diffusion denoising score matching losses for patch-based training."""
 
 from functools import lru_cache
-from typing import Callable, Literal, Tuple
+from typing import Any, Callable, Literal, Tuple
 
 import torch
 from jaxtyping import Float
 from tensordict import TensorDict
 from torch import Tensor
 
-from physicsnemo.diffusion.metrics.losses import _apply_loss_weight
 from physicsnemo.diffusion.multi_diffusion.models import MultiDiffusionModel2D
 from physicsnemo.diffusion.noise_schedulers import NoiseScheduler
+from physicsnemo.diffusion.utils.utils import apply_loss_weight
 
 
 class _CompiledPatchX:
@@ -267,6 +267,8 @@ class MultiDiffusionMSEDSMLoss:
         x0: Float[Tensor, "B C H W"],
         condition: Float[Tensor, " B *cond_dims"] | TensorDict | None = None,
         reset_patch_indices: bool = True,
+        t: Float[Tensor, " PB"] | None = None,
+        **model_kwargs: Any,
     ) -> Float[Tensor, "P_times_B C Hp Wp"] | Float[Tensor, ""]:
         r"""Compute the multi-diffusion denoising score matching loss.
 
@@ -281,6 +283,16 @@ class MultiDiffusionMSEDSMLoss:
             If ``True``, re-draw random patch positions before computing
             the loss. Set to ``False`` when patch positions are managed
             externally.
+        t : Tensor or None, optional, default=None
+            Pre-sampled diffusion time values of shape :math:`(P \times B,)`
+            — one value per patch.  When ``None`` (the default), times are
+            sampled internally via
+            :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.sample_time`.
+            Passing explicit times is useful when the caller needs access
+            to the sampled values for diagnostics (e.g., per-sigma-bin
+            loss tracking).
+        **model_kwargs : Any
+            Additional keyword arguments forwarded to the model.
 
         Returns
         -------
@@ -294,7 +306,8 @@ class MultiDiffusionMSEDSMLoss:
         # Patch x0 and sample per-patch noise
         x0_patched = self._compiled_patch_x(x0)  # (P*B, C, Hp, Wp)
         PB = x0_patched.shape[0]
-        t = self.noise_scheduler.sample_time(PB, device=x0.device, dtype=x0.dtype)
+        if t is None:
+            t = self.noise_scheduler.sample_time(PB, device=x0.device, dtype=x0.dtype)
         x_t = self.noise_scheduler.add_noise(x0_patched, t)
 
         # Forward with pre-patched x and t
@@ -304,13 +317,14 @@ class MultiDiffusionMSEDSMLoss:
             condition=condition,
             x_is_patched=True,
             t_is_patched=True,
+            **model_kwargs,
         )
 
         x0_pred = self._to_x0(prediction, x_t, t)
 
         loss = (x0_pred - x0_patched) ** 2
         w = self.noise_scheduler.loss_weight(t)
-        loss = _apply_loss_weight(w, x0_patched.ndim) * loss
+        loss = apply_loss_weight(w, x0_patched.ndim) * loss
         return self._reduce(loss)
 
 
@@ -501,6 +515,8 @@ class MultiDiffusionWeightedMSEDSMLoss:
         weight: Float[Tensor, "B C H W"],
         condition: Float[Tensor, " B *cond_dims"] | TensorDict | None = None,
         reset_patch_indices: bool = True,
+        t: Float[Tensor, " PB"] | None = None,
+        **model_kwargs: Any,
     ) -> Float[Tensor, "P_times_B C Hp Wp"] | Float[Tensor, ""]:
         r"""Compute the weighted multi-diffusion DSM loss.
 
@@ -517,6 +533,16 @@ class MultiDiffusionWeightedMSEDSMLoss:
             If ``True``, re-draw random patch positions before computing
             the loss. Set to ``False`` when patch positions are managed
             externally.
+        t : Tensor or None, optional, default=None
+            Pre-sampled diffusion time values of shape :math:`(P \times B,)`
+            — one value per patch.  When ``None`` (the default), times are
+            sampled internally via
+            :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.sample_time`.
+            Passing explicit times is useful when the caller needs access
+            to the sampled values for diagnostics (e.g., per-sigma-bin
+            loss tracking).
+        **model_kwargs : Any
+            Additional keyword arguments forwarded to the model.
 
         Returns
         -------
@@ -538,7 +564,8 @@ class MultiDiffusionWeightedMSEDSMLoss:
         x0_patched = self._compiled_patch_x(x0)  # (P*B, C, Hp, Wp)
         weight_patched = self._compiled_patch_x(weight)  # (P*B, C, Hp, Wp)
         PB = x0_patched.shape[0]
-        t = self.noise_scheduler.sample_time(PB, device=x0.device, dtype=x0.dtype)
+        if t is None:
+            t = self.noise_scheduler.sample_time(PB, device=x0.device, dtype=x0.dtype)
         x_t = self.noise_scheduler.add_noise(x0_patched, t)
 
         # Forward with pre-patched x and t
@@ -548,11 +575,12 @@ class MultiDiffusionWeightedMSEDSMLoss:
             condition=condition,
             x_is_patched=True,
             t_is_patched=True,
+            **model_kwargs,
         )
 
         x0_pred = self._to_x0(prediction, x_t, t)
 
         loss = weight_patched * (x0_pred - x0_patched) ** 2
         w = self.noise_scheduler.loss_weight(t)
-        loss = _apply_loss_weight(w, x0_patched.ndim) * loss
+        loss = apply_loss_weight(w, x0_patched.ndim) * loss
         return self._reduce(loss)

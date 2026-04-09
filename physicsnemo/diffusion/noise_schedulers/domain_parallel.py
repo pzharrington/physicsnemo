@@ -25,6 +25,7 @@ import torch.distributed as dist
 from jaxtyping import Float
 from torch import Tensor
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.placement_types import Replicate, Shard
 
 from physicsnemo.diffusion.base import Denoiser
@@ -32,6 +33,7 @@ from physicsnemo.diffusion.noise_schedulers.noise_schedulers import (
     LinearGaussianNoiseScheduler,
 )
 from physicsnemo.distributed import DistributedManager
+from physicsnemo.domain_parallel.shard_tensor import scatter_tensor
 
 
 class DomainParallelNoiseScheduler:
@@ -123,6 +125,10 @@ class DomainParallelNoiseScheduler:
         shard_dim: int,
     ) -> None:
         self._inner = scheduler
+        if not isinstance(scheduler, LinearGaussianNoiseScheduler):
+            raise ValueError(
+                f"DomainParallelNoiseScheduler only supports wrapping LinearGaussianNoiseScheduler, got {type(scheduler).__name__}."
+            )
         self._mesh = device_mesh
         self._shard_dim = shard_dim
         dm = DistributedManager()
@@ -268,8 +274,6 @@ class DomainParallelNoiseScheduler:
         if mesh is None:
             return self._inner.add_noise(x0, time)
 
-        from torch.distributed.tensor import DTensor
-
         t_bc = time.reshape(-1, *([1] * (x0.ndim - 1)))
         alpha_t = self._inner.alpha(t_bc)
         sigma_t = self._inner.sigma(t_bc)
@@ -348,7 +352,6 @@ class DomainParallelNoiseScheduler:
         placements: tuple,
     ) -> torch.Tensor:
         """Scatter *tensor* from rank 0 across the domain mesh."""
-        from physicsnemo.domain_parallel.shard_tensor import scatter_tensor
 
         return scatter_tensor(
             tensor,

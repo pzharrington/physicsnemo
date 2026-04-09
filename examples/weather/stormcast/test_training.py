@@ -396,7 +396,7 @@ def test_seeding(
     # -- instrument the loss to capture sigma values -------------------------
     from physicsnemo.diffusion.noise_schedulers import DomainParallelNoiseScheduler
 
-    scheduler = t.loss_fn.noise_scheduler
+    scheduler = t.train_noise_scheduler
     if domain_parallel_size > 1 and not isinstance(
         scheduler, DomainParallelNoiseScheduler
     ):

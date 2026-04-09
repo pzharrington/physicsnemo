@@ -725,3 +725,277 @@ class TestAllPreconditioners:
         with torch.no_grad():
             out_compiled_2 = compiled_precond(x, t, condition=condition)
         torch.testing.assert_close(out_compiled, out_compiled_2)
+
+    def test_model_kwargs_passthrough(
+        self,
+        model_config,
+        batch_data,
+        device,
+        precond_cls,
+        precond_kwargs,
+        precond_name,
+    ):
+        """model_kwargs are forwarded to the underlying model."""
+        model_cls, shape, _ = model_config
+
+        class KwargsCapture(Module):
+            """Model that records extra kwargs it receives."""
+
+            def __init__(self, inner):
+                super().__init__()
+                self.inner = inner
+                self.last_kwargs: dict = {}
+
+            def forward(self, x, t, condition=None, **model_kwargs):
+                self.last_kwargs = model_kwargs
+                return self.inner(x, t, condition=condition)
+
+        base = create_model_deterministic(model_cls, shape).to(device)
+        wrapper = KwargsCapture(base).to(device)
+        precond = precond_cls(wrapper, **precond_kwargs).to(device)
+
+        x = batch_data["x"]
+        t = batch_data["t"]
+        condition = batch_data["condition"]
+
+        precond(x, t, condition=condition, my_flag=True, scale=0.5)
+        assert wrapper.last_kwargs == {"my_flag": True, "scale": 0.5}
+
+    def test_model_kwargs_gradient_flow(
+        self,
+        model_config,
+        batch_data,
+        device,
+        precond_cls,
+        precond_kwargs,
+        precond_name,
+    ):
+        """Gradients flow when model_kwargs are passed."""
+        model_cls, shape, _ = model_config
+
+        class IgnoreKwargsModel(Module):
+            """Accepts but ignores extra kwargs."""
+
+            def __init__(self, inner):
+                super().__init__()
+                self.inner = inner
+
+            def forward(self, x, t, condition=None, **model_kwargs):
+                return self.inner(x, t, condition=condition)
+
+        base = create_model_deterministic(model_cls, shape).to(device)
+        wrapper = IgnoreKwargsModel(base).to(device)
+        precond = precond_cls(wrapper, **precond_kwargs).to(device)
+
+        x = batch_data["x"].clone().requires_grad_(True)
+        t = batch_data["t"]
+        condition = batch_data["condition"]
+
+        out = precond(x, t, condition=condition, extra_kwarg=42)
+        out.sum().backward()
+        assert x.grad is not None
+        assert not torch.isnan(x.grad).any()
+
+
+# =============================================================================
+# EDMPreconditioner per-channel sigma_data tests
+# =============================================================================
+
+# Per-channel sigma_data configurations: (sigma_data, name)
+_PER_CHANNEL_SIGMA_CONFIGS = [
+    (torch.tensor([0.3, 0.5, 0.7]), "list_3ch"),
+]
+
+
+def _make_per_channel_preconditioner(sigma_data, model_cls, shape):
+    """Create an EDMPreconditioner with per-channel sigma_data."""
+    model = create_model_deterministic(model_cls, shape)
+    return EDMPreconditioner(model, sigma_data=sigma_data)
+
+
+class TestEDMPerChannelNonRegression:
+    """Non-regression tests for EDMPreconditioner with per-channel sigma_data."""
+
+    @pytest.mark.parametrize(
+        "sigma_data,sd_name",
+        _PER_CHANNEL_SIGMA_CONFIGS,
+        ids=[c[1] for c in _PER_CHANNEL_SIGMA_CONFIGS],
+    )
+    def test_coefficients_non_regression(
+        self,
+        deterministic_settings,
+        model_config,
+        batch_data,
+        device,
+        tolerances,
+        sigma_data,
+        sd_name,
+    ):
+        """Per-channel compute_coefficients against reference data."""
+        model_cls, shape, arch_name = model_config
+        # Skip LinearModel — per-channel sigma_data is for spatial models
+        if model_cls == LinearModel:
+            pytest.skip("Per-channel sigma_data only applies to ConvModel")
+        precond = _make_per_channel_preconditioner(sigma_data, model_cls, shape).to(
+            device
+        )
+
+        batch_size = shape[0]
+        sigma_shape = (batch_size,) + (1,) * (len(shape) - 1)
+        sigma = batch_data["t"].view(sigma_shape)
+
+        c_in, c_noise, c_out, c_skip = precond.compute_coefficients(sigma)
+
+        ref_file = f"edm_perchan_{sd_name}_{arch_name}_coefficients.pth"
+        ref_data = load_or_create_reference(
+            ref_file,
+            lambda: {
+                "c_in": c_in.cpu(),
+                "c_noise": c_noise.cpu(),
+                "c_out": c_out.cpu(),
+                "c_skip": c_skip.cpu(),
+            },
+        )
+        compare_outputs(c_in, ref_data["c_in"], **tolerances)
+        compare_outputs(c_noise, ref_data["c_noise"], **tolerances)
+        compare_outputs(c_out, ref_data["c_out"], **tolerances)
+        compare_outputs(c_skip, ref_data["c_skip"], **tolerances)
+
+    @pytest.mark.parametrize(
+        "sigma_data,sd_name",
+        _PER_CHANNEL_SIGMA_CONFIGS,
+        ids=[c[1] for c in _PER_CHANNEL_SIGMA_CONFIGS],
+    )
+    def test_forward_non_regression(
+        self,
+        deterministic_settings,
+        model_config,
+        batch_data,
+        device,
+        tolerances,
+        sigma_data,
+        sd_name,
+    ):
+        """Per-channel forward pass against reference data."""
+        model_cls, shape, arch_name = model_config
+        if model_cls == LinearModel:
+            pytest.skip("Per-channel sigma_data only applies to ConvModel")
+        precond = _make_per_channel_preconditioner(sigma_data, model_cls, shape).to(
+            device
+        )
+
+        x = batch_data["x"]
+        t = batch_data["t"]
+        condition = batch_data["condition"]
+        out = precond(x, t, condition=condition)
+
+        ref_file = f"edm_perchan_{sd_name}_{arch_name}_forward.pth"
+        ref_data = load_or_create_reference(ref_file, lambda: {"out": out.cpu()})
+        compare_outputs(out, ref_data["out"], **tolerances)
+
+    @pytest.mark.parametrize(
+        "sigma_data,sd_name",
+        _PER_CHANNEL_SIGMA_CONFIGS,
+        ids=[c[1] for c in _PER_CHANNEL_SIGMA_CONFIGS],
+    )
+    def test_checkpoint_roundtrip(
+        self,
+        deterministic_settings,
+        model_config,
+        batch_data,
+        device,
+        tolerances,
+        sigma_data,
+        sd_name,
+    ):
+        """Per-channel sigma_data survives save -> load -> forward."""
+        model_cls, shape, arch_name = model_config
+        if model_cls == LinearModel:
+            pytest.skip("Per-channel sigma_data only applies to ConvModel")
+
+        def create_fn():
+            return _make_per_channel_preconditioner(sigma_data, model_cls, shape)
+
+        # Forward before checkpoint
+        precond_orig = create_fn().to(device)
+        x = batch_data["x"]
+        t = batch_data["t"]
+        condition = batch_data["condition"]
+        out_orig = precond_orig(x, t, condition=condition)
+
+        # Save and reload
+        ckpt_file = f"edm_perchan_{sd_name}_{arch_name}.mdlus"
+        precond_loaded = load_or_create_checkpoint(ckpt_file, create_fn).to(device)
+
+        # Verify sigma_data buffer survived
+        assert torch.allclose(
+            precond_loaded.sigma_data.cpu(), precond_orig.sigma_data.cpu()
+        )
+
+        out_loaded = precond_loaded(x, t, condition=condition)
+
+        ref_file = f"edm_perchan_{sd_name}_{arch_name}_forward.pth"
+        ref_data = load_or_create_reference(ref_file, lambda: {"out": out_orig.cpu()})
+        compare_outputs(out_loaded, ref_data["out"], **tolerances)
+
+    @pytest.mark.parametrize(
+        "sigma_data,sd_name",
+        _PER_CHANNEL_SIGMA_CONFIGS,
+        ids=[c[1] for c in _PER_CHANNEL_SIGMA_CONFIGS],
+    )
+    def test_gradient_flow(
+        self,
+        model_config,
+        batch_data,
+        device,
+        sigma_data,
+        sd_name,
+    ):
+        """Gradients flow through per-channel EDMPreconditioner."""
+        model_cls, shape, _ = model_config
+        if model_cls == LinearModel:
+            pytest.skip("Per-channel sigma_data only applies to ConvModel")
+        precond = _make_per_channel_preconditioner(sigma_data, model_cls, shape).to(
+            device
+        )
+
+        x = batch_data["x"].clone().requires_grad_(True)
+        t = batch_data["t"]
+        condition = batch_data["condition"]
+
+        output = precond(x, t, condition=condition)
+        loss = output.sum()
+        loss.backward()
+
+        assert x.grad is not None
+        assert not torch.isnan(x.grad).any()
+
+
+# =============================================================================
+# EDMPreconditioner channel validation tests
+# =============================================================================
+
+
+class TestEDMChannelValidation:
+    """Tests for EDMPreconditioner per-channel sigma_data shape validation."""
+
+    def test_channel_mismatch_raises(self, device):
+        """Mismatched channel count between sigma_data and x raises ValueError."""
+        model = instantiate_model_deterministic(ConvModel, seed=0, channels=3)
+        precond = EDMPreconditioner(model, sigma_data=[0.3, 0.5]).to(device)
+
+        x = torch.randn(2, 3, 8, 6, device=device)  # 3 channels
+        t = torch.rand(2, device=device)
+
+        with pytest.raises(ValueError, match="2 channels.*3 channels"):
+            precond(x, t)
+
+    def test_scalar_sigma_data_no_validation_error(self, device):
+        """Scalar sigma_data does not trigger channel validation."""
+        model = instantiate_model_deterministic(ConvModel, seed=0, channels=3)
+        precond = EDMPreconditioner(model, sigma_data=0.5).to(device)
+
+        x = torch.randn(2, 3, 8, 6, device=device)
+        t = torch.rand(2, device=device)
+        # Should not raise
+        precond(x, t)

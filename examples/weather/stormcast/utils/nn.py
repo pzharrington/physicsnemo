@@ -28,6 +28,7 @@ from physicsnemo.diffusion.preconditioners import EDMPreconditioner
 from physicsnemo.diffusion.samplers import sample as diffusion_sample
 from physicsnemo.diffusion.utils import ConcatConditionWrapper
 from physicsnemo.models.dit import DiT
+from physicsnemo.diffusion.noise_schedulers import NoiseScheduler
 
 import utils.apex  # do not remove, enables Apex LayerNorm with ShardTensor
 
@@ -261,7 +262,7 @@ def diffusion_model_forward(
     model: Module,
     condition: torch.Tensor,
     shape: Iterable[int],
-    scheduler: object,
+    scheduler: NoiseScheduler,
     dtype: torch.dtype | None = None,
     device: torch.device | None = None,
     lead_time_label: torch.Tensor | None = None,

@@ -18,11 +18,14 @@
 
 from typing import Any, Dict, List, Literal
 
+import torch.distributed as dist
 from jaxtyping import Float
 from torch import Tensor
+from torch.distributed.tensor.placement_types import Replicate
 
 from physicsnemo.diffusion.base import Denoiser
 from physicsnemo.diffusion.noise_schedulers import NoiseScheduler
+from physicsnemo.domain_parallel.shard_tensor import scatter_tensor
 
 from .solvers import (
     EDMStochasticEulerSolver,
@@ -58,23 +61,15 @@ def _maybe_replicate_timesteps(
     if xN_mesh is None or hasattr(t_steps, "device_mesh"):
         return t_steps
 
-    try:
-        import torch.distributed as dist
-        from torch.distributed.tensor.placement_types import Replicate
-
-        from physicsnemo.domain_parallel.shard_tensor import scatter_tensor
-
-        source_rank = dist.get_global_rank(xN_mesh.get_group(), 0)
-        return scatter_tensor(
-            t_steps,
-            source_rank,
-            xN_mesh,
-            placements=(Replicate(),),
-            global_shape=t_steps.shape,
-            dtype=t_steps.dtype,
-        )
-    except ImportError:
-        return t_steps
+    source_rank = dist.get_global_rank(xN_mesh.get_group(), 0)
+    return scatter_tensor(
+        t_steps,
+        source_rank,
+        xN_mesh,
+        placements=(Replicate(),),
+        global_shape=t_steps.shape,
+        dtype=t_steps.dtype,
+    )
 
 
 def sample(

@@ -134,11 +134,10 @@ class RegressionLoss:
 
 
 class SigmaBinTracker:
-    """Track per-sigma-bin loss and bias for diffusion training diagnostics.
+    """Track per-sigma-bin loss for diffusion training diagnostics.
 
-    Accumulates sample-level L2 loss and signed denoising bias into
-    equal-probability sigma bins, then logs per-bin means via an
-    experiment logger.
+    Accumulates sample-level L2 loss into equal-probability sigma bins,
+    then logs per-bin means via an experiment logger.
 
     Parameters
     ----------
@@ -157,7 +156,6 @@ class SigmaBinTracker:
         self.device = device
         self._edges: torch.Tensor | None = None
         self._loss_sum: torch.Tensor | None = None
-        self._bias_sum: torch.Tensor | None = None
         self._count: torch.Tensor | None = None
         if not self.enabled:
             return
@@ -192,16 +190,14 @@ class SigmaBinTracker:
             return
         n = int(self._edges.numel() - 1)
         self._loss_sum = torch.zeros(n, device=self.device, dtype=torch.float32)
-        self._bias_sum = torch.zeros(n, device=self.device, dtype=torch.float32)
         self._count = torch.zeros(n, device=self.device, dtype=torch.float32)
 
     def update(
         self,
         loss: torch.Tensor,
         sigma: torch.Tensor | None,
-        bias: torch.Tensor | None = None,
     ) -> None:
-        """Accumulate one micro-batch of per-sample loss/bias into bins.
+        """Accumulate one micro-batch of per-sample loss into bins.
 
         Parameters
         ----------
@@ -209,8 +205,6 @@ class SigmaBinTracker:
             Per-pixel loss, shape ``[B, C, H, W]``.
         sigma : torch.Tensor | None
             Sampled sigma values, shape ``[B, 1, 1, 1]`` or ``[B]``.
-        bias : torch.Tensor | None
-            Per-sample mean signed error ``[B]``.
         """
         if not self.enabled or sigma is None:
             return
@@ -226,8 +220,6 @@ class SigmaBinTracker:
         self._count.index_add_(
             0, idx, torch.ones_like(sample_loss[valid], dtype=torch.float32)
         )
-        if bias is not None:
-            self._bias_sum.index_add_(0, idx, bias.detach().to(torch.float32)[valid])
 
     def log(self, logger, world_size: int = 1) -> None:
         """All-reduce across ranks and log per-bin means.
@@ -242,7 +234,7 @@ class SigmaBinTracker:
         if not self.enabled or self._count is None:
             return
         if world_size > 1:
-            for t in (self._loss_sum, self._bias_sum, self._count):
+            for t in (self._loss_sum, self._count):
                 torch.distributed.all_reduce(t, op=torch.distributed.ReduceOp.SUM)
         edges = self._edges.detach().cpu().tolist()
         for b in range(int(self._edges.numel() - 1)):
@@ -253,8 +245,4 @@ class SigmaBinTracker:
             logger.log_value(
                 f"loss/train_sigma_bin/{tag}",
                 float((self._loss_sum[b] / self._count[b]).item()),
-            )
-            logger.log_value(
-                f"bias/train_sigma_bin/{tag}",
-                float((self._bias_sum[b] / self._count[b]).item()),
             )

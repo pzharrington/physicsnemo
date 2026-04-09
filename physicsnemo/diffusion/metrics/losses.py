@@ -26,20 +26,25 @@ from tensordict import TensorDict
 from torch import Tensor
 
 from physicsnemo.diffusion.base import DiffusionModel
-from physicsnemo.diffusion.noise_schedulers import NoiseScheduler
+from physicsnemo.diffusion.noise_schedulers import (
+    DomainParallelNoiseScheduler,
+    NoiseScheduler,
+)
+from physicsnemo.diffusion.utils.utils import apply_loss_weight
 
 
-def _apply_loss_weight(w: torch.Tensor, data_ndim: int) -> torch.Tensor:
-    """Reshape a loss weight tensor for broadcasting with per-element loss.
-
-    Handles both scalar weights of shape ``(N,)`` and per-channel weights of
-    shape ``(N, C)`` produced by schedulers with per-channel ``sigma_data``.
-    Trailing spatial dimensions are padded with size-1 so that the result
-    broadcasts correctly against loss tensors of shape ``(B, C, ...)``.
-    """
-    if w.ndim == 1:
-        return w.reshape(-1, *([1] * (data_ndim - 1)))
-    return w.reshape(*w.shape, *([1] * (data_ndim - w.ndim)))
+def _check_domain_parallel_scheduler(
+    x0: torch.Tensor, scheduler: NoiseScheduler
+) -> None:
+    """Raise if *x0* is domain-sharded but *scheduler* is not domain-parallel."""
+    mesh = getattr(x0, "device_mesh", None)
+    if mesh is not None and not isinstance(scheduler, DomainParallelNoiseScheduler):
+        raise ValueError(
+            "x0 is a ShardTensor (domain-parallel) but the noise scheduler "
+            "is not a DomainParallelNoiseScheduler. Wrap your scheduler with "
+            "DomainParallelNoiseScheduler before passing it to the loss. "
+            "See physicsnemo.diffusion.noise_schedulers.DomainParallelNoiseScheduler."
+        )
 
 
 def _maybe_promote_to_mesh(t: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
@@ -93,10 +98,14 @@ class MSEDSMLoss:
     :math:`\hat{\mathbf{x}}_0` estimate via a user-provided
     ``score_to_x0_fn`` callback (``prediction_type="score"``).
 
-    For domain-parallel training where sampled diffusion times must be
-    broadcast across spatial shards, wrap the scheduler with
-    :class:`~physicsnemo.diffusion.noise_schedulers.DomainParallelNoiseScheduler` before
-    passing it here.
+    .. warning::
+
+        For domain-parallel training where ``x0`` is a ``ShardTensor``,
+        the scheduler **must** be wrapped with
+        :class:`~physicsnemo.diffusion.noise_schedulers.DomainParallelNoiseScheduler`
+        so that sampled diffusion times are broadcast across spatial
+        shards.  Passing a plain scheduler with sharded data will raise a
+        ``ValueError`` at runtime.
 
     The ``model`` argument must satisfy the
     :class:`~physicsnemo.diffusion.DiffusionModel` interface:
@@ -244,7 +253,9 @@ class MSEDSMLoss:
     preconditioner. This shows how to plug custom components into
     :class:`MSEDSMLoss` by implementing the
     :class:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler` and
-    :class:`~physicsnemo.diffusion.DiffusionModel` protocols from scratch:
+    :class:`~physicsnemo.diffusion.DiffusionModel` protocols from scratch.
+    It also demonstrates passing externally sampled diffusion times via the
+    ``t`` argument for per-sigma-bin loss tracking:
 
     >>> import math
     >>>
@@ -278,9 +289,14 @@ class MSEDSMLoss:
     >>> loss_fn = MSEDSMLoss(cond_model, my_scheduler)
     >>> x0 = torch.randn(2, 3, 8, 8)
     >>> cond = torch.randn(2, 3, 8, 8)  # single-tensor conditioning
-    >>> loss = loss_fn(x0, condition=cond)
+    >>>
+    >>> # Sample times externally for per-sigma-bin loss tracking
+    >>> t = my_scheduler.sample_time(x0.shape[0], device=x0.device, dtype=x0.dtype)
+    >>> loss = loss_fn(x0, condition=cond, t=t)
     >>> loss.shape
     torch.Size([])
+    >>> t.shape  # t is available for diagnostics after the loss call
+    torch.Size([2])
     >>>
     >>> # Also works with score prediction + custom conversion
     >>> loss_fn_score = MSEDSMLoss(
@@ -338,7 +354,7 @@ class MSEDSMLoss:
         self,
         x0: Float[Tensor, " B *dims"],
         condition: Float[Tensor, " B *cond_dims"] | TensorDict | None = None,
-        t: Float[Tensor, " N"] | None = None,
+        t: Float[Tensor, " B"] | None = None,
         **model_kwargs: Any,
     ) -> Float[Tensor, " B *dims"] | Float[Tensor, ""]:
         r"""
@@ -354,10 +370,11 @@ class MSEDSMLoss:
             :class:`~physicsnemo.diffusion.DiffusionModel` for details.
         t : Tensor or None, optional, default=None
             Pre-sampled diffusion time values of shape :math:`(B,)`. When
-            ``None`` (the default), times are sampled internally via the
-            noise scheduler. Passing explicit times is useful when the
-            caller needs access to the sampled values for diagnostics
-            (e.g., per-sigma-bin loss tracking).
+            ``None`` (the default), times are sampled internally via
+            :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.sample_time`.
+            Passing explicit times is useful when the caller needs access
+            to the sampled values for diagnostics (e.g., per-sigma-bin
+            loss tracking).
         **model_kwargs : Any
             Additional keyword arguments forwarded to the model
 
@@ -368,6 +385,8 @@ class MSEDSMLoss:
             shape :math:`(B, *)` as ``x0``. If ``reduction="mean"``, or
             ``reduction="sum"``, a scalar tensor.
         """
+        if not torch.compiler.is_compiling():
+            _check_domain_parallel_scheduler(x0, self.noise_scheduler)
         B = x0.shape[0]
         if t is None:
             t = self.noise_scheduler.sample_time(B, device=x0.device, dtype=x0.dtype)
@@ -376,7 +395,7 @@ class MSEDSMLoss:
         x0_pred = self._to_x0(prediction, x_t, t)
         loss = (x0_pred - x0) ** 2
         w = self.noise_scheduler.loss_weight(t)
-        w = _apply_loss_weight(w, x0.ndim)
+        w = apply_loss_weight(w, x0.ndim)
         w = _maybe_promote_to_mesh(w, loss)
         loss = w * loss
         return self._reduce(loss)
@@ -503,7 +522,7 @@ class WeightedMSEDSMLoss:
         x0: Float[Tensor, " B *dims"],
         weight: Float[Tensor, " B *dims"],
         condition: Float[Tensor, " B *cond_dims"] | TensorDict | None = None,
-        t: Float[Tensor, " N"] | None = None,
+        t: Float[Tensor, " B"] | None = None,
         **model_kwargs: Any,
     ) -> Float[Tensor, " B *dims"] | Float[Tensor, ""]:
         r"""
@@ -523,10 +542,11 @@ class WeightedMSEDSMLoss:
             :class:`~physicsnemo.diffusion.DiffusionModel` for details.
         t : Tensor or None, optional, default=None
             Pre-sampled diffusion time values of shape :math:`(B,)`. When
-            ``None`` (the default), times are sampled internally via the
-            noise scheduler. Passing explicit times is useful when the
-            caller needs access to the sampled values for diagnostics
-            (e.g., per-sigma-bin loss tracking).
+            ``None`` (the default), times are sampled internally via
+            :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.sample_time`.
+            Passing explicit times is useful when the caller needs access
+            to the sampled values for diagnostics (e.g., per-sigma-bin
+            loss tracking).
         **model_kwargs : Any
             Additional keyword arguments forwarded to the model
 
@@ -537,6 +557,8 @@ class WeightedMSEDSMLoss:
             shape :math:`(B, *)` as ``x0``. If ``reduction="mean"``, or
             ``reduction="sum"``, a scalar tensor.
         """
+        if not torch.compiler.is_compiling():
+            _check_domain_parallel_scheduler(x0, self.noise_scheduler)
         B = x0.shape[0]
         if t is None:
             t = self.noise_scheduler.sample_time(B, device=x0.device, dtype=x0.dtype)
@@ -545,7 +567,7 @@ class WeightedMSEDSMLoss:
         x0_pred = self._to_x0(prediction, x_t, t)
         loss = weight * (x0_pred - x0) ** 2
         w = self.noise_scheduler.loss_weight(t)
-        w = _apply_loss_weight(w, x0.ndim)
+        w = apply_loss_weight(w, x0.ndim)
         w = _maybe_promote_to_mesh(w, loss)
         loss = w * loss
         return self._reduce(loss)

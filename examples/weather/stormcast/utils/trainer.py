@@ -29,7 +29,7 @@ from physicsnemo.distributed import DistributedManager
 from physicsnemo.utils import load_checkpoint, load_model_weights, save_checkpoint
 
 from physicsnemo.diffusion.metrics.losses import WeightedMSEDSMLoss
-from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
+from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler, NoiseScheduler
 
 from utils.loss import (
     RegressionLoss,
@@ -83,6 +83,11 @@ class Trainer:
         Current training step count.
     val_loss : float
         Latest validation loss.
+    train_noise_scheduler : NoiseScheduler or None
+        For diffusion training, the noise scheduler used for training-time
+        sigma sampling (same object as held by the loss). Set before applying
+        ``torch.compile`` to the loss so callers always access the real
+        scheduler. ``None`` for regression runs.
 
     Examples
     --------
@@ -162,7 +167,8 @@ class Trainer:
         # Resume from checkpoint (all ranks participate)
         (self.total_steps, self.val_loss) = self._resume_or_init()
 
-        # Loss function
+        # Loss function (``train_noise_scheduler`` is set inside for diffusion)
+        self.train_noise_scheduler: NoiseScheduler | None = None
         self.loss_fn = self._setup_loss()
         self.sigma_bin_tracker = SigmaBinTracker(
             self.cfg.training.loss, self.device, self.loss_type
@@ -471,18 +477,29 @@ class Trainer:
         A separate sampling scheduler is also created for validation-time
         diffusion sampling.
 
+        When ``training.perf.torch_compile`` is enabled (and domain parallelism
+        is off), the loss callable is wrapped with :func:`torch.compile` so the
+        forward path through the preconditioned model and loss is compiled.
+
         Returns
         -------
         WeightedMSEDSMLoss | RegressionLoss
-            The loss function.
+            The loss function (possibly ``torch.compile``-wrapped).
         """
         self.logger.info("Setting up loss function...")
 
         self.sampling_scheduler = None
 
+        compile_loss = self.use_torch_compile and not self.use_shard_tensor
+        if self.use_torch_compile and self.use_shard_tensor:
+            self.logger.info(
+                "Skipping torch.compile on loss: not supported with "
+                "domain parallelism / ShardTensor."
+            )
+
         if self.loss_type == "regression":
             loss_fn = RegressionLoss(self.net)
-            if self.use_torch_compile:
+            if compile_loss:
                 self.logger.info("Compiling loss function with torch.compile...")
                 loss_fn = torch.compile(loss_fn)
             return loss_fn
@@ -500,6 +517,7 @@ class Trainer:
             noise_scheduler,
         )
         loss_fn = WeightedMSEDSMLoss(self.net, noise_scheduler, reduction="none")
+        self.train_noise_scheduler = loss_fn.noise_scheduler
 
         sa = self.cfg.sampler.args.__dict__
         sampling_scheduler = EDMNoiseScheduler(
@@ -510,6 +528,10 @@ class Trainer:
         self.sampling_scheduler = self.parallel_helper.make_domain_parallel_scheduler(
             sampling_scheduler
         )
+
+        if compile_loss:
+            self.logger.info("Compiling loss function with torch.compile...")
+            loss_fn = torch.compile(loss_fn)
 
         return loss_fn
 
@@ -646,7 +668,8 @@ class Trainer:
 
                 sigma = None
                 if self.loss_type != "regression":
-                    sigma = self.loss_fn.noise_scheduler.sample_time(
+                    assert self.train_noise_scheduler is not None
+                    sigma = self.train_noise_scheduler.sample_time(
                         target.shape[0],
                         device=target.device,
                         dtype=target.dtype,
