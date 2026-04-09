@@ -209,6 +209,9 @@ class SigmaBinTracker:
         if not self.enabled or sigma is None:
             return
         sample_loss = loss.detach().mean(dim=(1, 2, 3))
+        if hasattr(sample_loss, "to_local"):
+            # Cast to regular tensor for bucketize after reducing across sharded dims
+            sample_loss = sample_loss.to_local()
         sample_sigma = sigma.detach().reshape(-1).to(torch.float32)
         bin_idx = torch.bucketize(sample_sigma, self._edges) - 1
         n_bins = int(self._edges.numel() - 1)

@@ -172,7 +172,10 @@ class DomainParallelNoiseScheduler:
             Sampled diffusion times of shape :math:`(N,)`, identical on all
             ranks within the domain-parallel group.
         """
-        t = self._inner.sample_time(N, device=device, dtype=dtype)
+        if dist.get_rank(self._group) == 0:
+            t = self._inner.sample_time(N, device=device, dtype=dtype)
+        else:
+            t = torch.empty(N, device=device, dtype=dtype)
         return self._broadcast_time(t)
 
     def timesteps(
