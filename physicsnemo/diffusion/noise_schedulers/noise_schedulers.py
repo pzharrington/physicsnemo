@@ -1090,7 +1090,7 @@ class EDMNoiseScheduler(LinearGaussianNoiseScheduler):
         sigma_min: float = 0.002,
         sigma_max: float = 80.0,
         rho: float = 7.0,
-        sigma_data: float | Float[Tensor, " *channels"] = 0.5,
+        sigma_data: float | Float[Tensor, " C"] = 0.5,
         P_mean: float = -1.2,
         P_std: float = 1.2,
     ) -> None:
@@ -1301,7 +1301,7 @@ class EDMLogUniformNoiseScheduler(EDMNoiseScheduler):
         sigma_min: float = 0.002,
         sigma_max: float = 80.0,
         rho: float = 7.0,
-        sigma_data: float | Float[Tensor, " *channels"] = 0.5,
+        sigma_data: float | Float[Tensor, " C"] = 0.5,
     ) -> None:
         super().__init__(
             sigma_min=sigma_min,
@@ -2073,7 +2073,7 @@ class StudentTEDMNoiseScheduler(LinearGaussianNoiseScheduler):
         sigma_max: float = 80.0,
         rho: float = 7.0,
         nu: int = 10,
-        sigma_data: float | Float[Tensor, " *channels"] = 0.5,
+        sigma_data: float | Float[Tensor, " C"] = 0.5,
         P_mean: float = -1.2,
         P_std: float = 1.2,
     ) -> None:

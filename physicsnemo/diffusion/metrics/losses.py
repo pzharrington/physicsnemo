@@ -47,6 +47,20 @@ def _check_domain_parallel_scheduler(
         )
 
 
+def _check_weight_mesh(weight: torch.Tensor, x0: torch.Tensor) -> None:
+    """Raise if *x0* is a DTensor but *weight* is not on the same mesh."""
+    mesh = getattr(x0, "device_mesh", None)
+    if mesh is None:
+        return
+    weight_mesh = getattr(weight, "device_mesh", None)
+    if weight_mesh is None:
+        raise ValueError(
+            "x0 is a DTensor (domain-parallel) but weight is a plain tensor. "
+            "weight must be a DTensor on the same device mesh as x0. "
+            "Shard or replicate weight to match x0 before passing it to the loss."
+        )
+
+
 def _maybe_promote_to_mesh(t: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
     """Promote *t* to a replicated DTensor on *ref*'s device mesh if needed.
 
@@ -353,8 +367,8 @@ class MSEDSMLoss:
     def __call__(
         self,
         x0: Float[Tensor, " B *dims"],
-        condition: Float[Tensor, " B *cond_dims"] | TensorDict | None = None,
         t: Float[Tensor, " B"] | None = None,
+        condition: Float[Tensor, " B *cond_dims"] | TensorDict | None = None,
         **model_kwargs: Any,
     ) -> Float[Tensor, " B *dims"] | Float[Tensor, ""]:
         r"""
@@ -365,9 +379,6 @@ class MSEDSMLoss:
         x0 : Tensor
             Clean data of shape :math:`(B, *)` where :math:`B` is the batch
             size and :math:`*` denotes any number of additional dimensions.
-        condition : Tensor, TensorDict, or None, optional, default=None
-            Conditioning information passed to the model. See
-            :class:`~physicsnemo.diffusion.DiffusionModel` for details.
         t : Tensor or None, optional, default=None
             Pre-sampled diffusion time values of shape :math:`(B,)`. When
             ``None`` (the default), times are sampled internally via
@@ -375,6 +386,9 @@ class MSEDSMLoss:
             Passing explicit times is useful when the caller needs access
             to the sampled values for diagnostics (e.g., per-sigma-bin
             loss tracking).
+        condition : Tensor, TensorDict, or None, optional, default=None
+            Conditioning information passed to the model. See
+            :class:`~physicsnemo.diffusion.DiffusionModel` for details.
         **model_kwargs : Any
             Additional keyword arguments forwarded to the model
 
@@ -422,6 +436,16 @@ class WeightedMSEDSMLoss:
 
         The ``weight`` argument is **not** related to the time-dependent loss
         weight :math:`w(t)` provided by the noise scheduler.
+
+    .. warning::
+
+        For domain-parallel training where ``x0`` is a ``DTensor``
+        (e.g., a :class:`~physicsnemo.domain_parallel.ShardTensor`), ``weight`` must also be a ``DTensor``
+        on the same device mesh.  The loss function does **not**
+        automatically promote ``weight``; callers are responsible for
+        sharding or replicating it to match ``x0``.  Passing a plain
+        tensor ``weight`` with a sharded ``x0`` will raise a
+        ``ValueError`` at runtime.
 
     For more details on prediction types, expected signatures, and
     additional examples, see :class:`MSEDSMLoss`.
@@ -521,8 +545,8 @@ class WeightedMSEDSMLoss:
         self,
         x0: Float[Tensor, " B *dims"],
         weight: Float[Tensor, " B *dims"],
-        condition: Float[Tensor, " B *cond_dims"] | TensorDict | None = None,
         t: Float[Tensor, " B"] | None = None,
+        condition: Float[Tensor, " B *cond_dims"] | TensorDict | None = None,
         **model_kwargs: Any,
     ) -> Float[Tensor, " B *dims"] | Float[Tensor, ""]:
         r"""
@@ -536,10 +560,9 @@ class WeightedMSEDSMLoss:
         weight : Tensor
             Per-element weight of shape :math:`(B, *)`, same shape as
             ``x0``. For binary masking, use 0 for masked elements and 1
-            for active elements.
-        condition : Tensor, TensorDict, or None, optional, default=None
-            Conditioning information passed to the model. See
-            :class:`~physicsnemo.diffusion.DiffusionModel` for details.
+            for active elements.  When ``x0`` is a ``DTensor``
+            (domain-parallel), ``weight`` must also be a ``DTensor`` on
+            the same device mesh.
         t : Tensor or None, optional, default=None
             Pre-sampled diffusion time values of shape :math:`(B,)`. When
             ``None`` (the default), times are sampled internally via
@@ -547,6 +570,9 @@ class WeightedMSEDSMLoss:
             Passing explicit times is useful when the caller needs access
             to the sampled values for diagnostics (e.g., per-sigma-bin
             loss tracking).
+        condition : Tensor, TensorDict, or None, optional, default=None
+            Conditioning information passed to the model. See
+            :class:`~physicsnemo.diffusion.DiffusionModel` for details.
         **model_kwargs : Any
             Additional keyword arguments forwarded to the model
 
@@ -558,7 +584,9 @@ class WeightedMSEDSMLoss:
             ``reduction="sum"``, a scalar tensor.
         """
         if not torch.compiler.is_compiling():
+            # Validation checks for domain-parallel training
             _check_domain_parallel_scheduler(x0, self.noise_scheduler)
+            _check_weight_mesh(weight, x0)
         B = x0.shape[0]
         if t is None:
             t = self.noise_scheduler.sample_time(B, device=x0.device, dtype=x0.dtype)

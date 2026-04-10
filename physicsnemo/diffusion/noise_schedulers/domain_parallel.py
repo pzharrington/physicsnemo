@@ -31,12 +31,13 @@ from torch.distributed.tensor.placement_types import Replicate, Shard
 from physicsnemo.diffusion.base import Denoiser
 from physicsnemo.diffusion.noise_schedulers.noise_schedulers import (
     LinearGaussianNoiseScheduler,
+    NoiseScheduler,
 )
 from physicsnemo.distributed import DistributedManager
 from physicsnemo.domain_parallel.shard_tensor import scatter_tensor
 
 
-class DomainParallelNoiseScheduler:
+class DomainParallelNoiseScheduler(NoiseScheduler):
     r"""Domain-parallel noise scheduler for distributed diffusion training and sampling.
 
     This class implements the
