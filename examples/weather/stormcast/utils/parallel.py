@@ -398,10 +398,19 @@ def partition_model_selective(
     for key, param in submodule._parameters.items():
         if param is None:
             continue
+        # Explicitly handle every parameter so that distribute_module's
+        # internal replicate_module_params_buffers (which drops
+        # requires_grad in PyTorch <= 2.10) never sees a plain tensor.
+        # This prevents a bug where `distribute_module` silently flips
+        # `requires_grad` on frozen params.
         if (shard_dim := shard_dim_selector(key)) is not None:
-            sharded = distribute_tensor(
-                param,
-                device_mesh=device_mesh,
-                placements=[Shard(shard_dim)],
+            dt = distribute_tensor(
+                param, device_mesh=device_mesh, placements=[Shard(shard_dim)]
             )
-            submodule.register_parameter(key, torch.nn.Parameter(sharded))
+        else:
+            dt = distribute_tensor(
+                param, device_mesh=device_mesh, placements=[Replicate()]
+            )
+        submodule.register_parameter(
+            key, torch.nn.Parameter(dt, requires_grad=param.requires_grad)
+        )
