@@ -18,12 +18,14 @@
 import numpy as np
 import pytest
 
-from physicsnemo.experimental.datapipes.healda.configs.sensors import SENSOR_OFFSET
-from physicsnemo.experimental.datapipes.healda.transforms.obs_filtering import (
+pa = pytest.importorskip("pyarrow")
+
+from physicsnemo.experimental.datapipes.healda.configs.sensors import (  # noqa: E402
+    SENSOR_OFFSET,
+)
+from physicsnemo.experimental.datapipes.healda.transforms.obs_filtering import (  # noqa: E402
     filter_observations,
 )
-
-pa = pytest.importorskip("pyarrow")
 
 
 def _make_filter_test_table():

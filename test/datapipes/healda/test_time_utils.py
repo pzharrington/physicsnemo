@@ -21,14 +21,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from physicsnemo.experimental.datapipes.healda.time_utils import (
+cftime = pytest.importorskip("cftime")
+
+from physicsnemo.experimental.datapipes.healda.time_utils import (  # noqa: E402
     as_cftime,
     as_numpy,
     as_pydatetime,
     as_timestamp,
 )
-
-cftime = pytest.importorskip("cftime")
 
 
 def test_as_numpy_from_pandas_index():

@@ -22,14 +22,14 @@ implementation matches the reference Python implementation.
 import pytest
 import torch
 
-from physicsnemo.experimental.datapipes.healda.transforms import (
+triton = pytest.importorskip("triton")
+
+from physicsnemo.experimental.datapipes.healda.transforms import (  # noqa: E402
     obs_features as standard,
 )
-from physicsnemo.experimental.datapipes.healda.transforms import (
+from physicsnemo.experimental.datapipes.healda.transforms import (  # noqa: E402
     obs_features_ext as extended,
 )
-
-triton = pytest.importorskip("triton")
 
 
 def _make_obs_data(n, device, include_lat=False):
