@@ -133,7 +133,6 @@ def test_lengths_nonnegative():
 def test_split_handles_sparse_windows():
     """Sensor missing from some (b,t) windows."""
     B, T = 2, 3
-    sensors = [0, 4]
 
     all_obs = []
     for b in range(B):

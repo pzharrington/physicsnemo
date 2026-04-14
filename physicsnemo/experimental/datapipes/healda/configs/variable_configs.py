@@ -19,27 +19,6 @@ from physicsnemo.experimental.datapipes.healda.types import VariableConfig
 
 VARIABLE_CONFIGS = {}
 
-VARIABLE_CONFIGS["default"] = VariableConfig(
-    name="ufs",
-    levels=[1000, 925, 850, 700, 600, 500, 400, 300, 250, 200, 150, 100, 50],
-    variables_3d=["Q", "U", "V", "T", "Z"],
-    variables_2d=[
-        "tas",
-        "uas",
-        "vas",
-        "rlut",
-        "rsut",
-        "pressfc",
-        "pr",
-        "rsds",
-        "sst",
-        "sic",
-        "hfls",
-        "huss",
-    ],
-    variables_static=["orog", "lfrac"],
-)
-
 VARIABLE_CONFIGS["era5"] = VariableConfig(
     name="era5",
     levels=[1000, 925, 850, 700, 600, 500, 400, 300, 250, 200, 150, 100, 50],
@@ -54,23 +33,6 @@ VARIABLE_CONFIGS["era5"] = VariableConfig(
         "pres_msl",
         "sst",
         "sic",
-    ],
-    variables_static=["orog", "lfrac"],
-)
-
-VARIABLE_CONFIGS["gfs"] = VariableConfig(
-    name="gfs",
-    levels=[1000, 925, 850, 700, 600, 500, 400, 300, 250, 200, 150, 100, 50],
-    variables_3d=["U", "V", "T", "Z", "Q"],
-    variables_2d=[
-        "tcwv",
-        "tas",
-        "uas",
-        "vas",
-        "100u",
-        "100v",
-        "pres_msl",
-        "sp",
     ],
     variables_static=["orog", "lfrac"],
 )

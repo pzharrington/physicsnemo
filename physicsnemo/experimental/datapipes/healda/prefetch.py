@@ -18,7 +18,8 @@
 ``prefetch_map`` wraps any iterable (typically a DataLoader) and applies a
 transform function in a background thread using a separate CUDA stream.
 This hides the CPU-to-GPU transfer and GPU featurization latency behind the
-training forward/backward pass.
+training forward/backward pass (better parallelsim). It works best when
+`pin_memory=True` is used on the DataLoader.
 """
 
 import dataclasses

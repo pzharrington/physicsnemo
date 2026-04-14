@@ -17,8 +17,6 @@
 
 import pytest
 
-pa = pytest.importorskip("pyarrow")
-
 from physicsnemo.experimental.datapipes.healda.configs.combined_schema import (
     get_channel_table_schema,
     get_combined_observation_schema,
@@ -27,6 +25,8 @@ from physicsnemo.experimental.datapipes.healda.configs.sensors import (
     SENSOR_CONFIGS,
     SENSOR_NAME_TO_ID,
 )
+
+pa = pytest.importorskip("pyarrow")
 
 
 def test_combined_schema_has_required_fields():

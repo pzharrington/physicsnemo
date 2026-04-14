@@ -201,7 +201,7 @@ def _get_nearest_stats(config: VariableConfig):
     return raw.loc[mapped_idx]
 
 
-def open_era5_xarray(path: str | None = None, **kwargs) -> xarray.Dataset:
+def open_era5_xarray(path: str | None = None, **kwargs) -> "xarray.Dataset":
     """Open the ERA5 74-variable zarr dataset as xarray.
 
     Args:

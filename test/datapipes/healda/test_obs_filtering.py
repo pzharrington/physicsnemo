@@ -18,12 +18,12 @@
 import numpy as np
 import pytest
 
-pa = pytest.importorskip("pyarrow")
-
 from physicsnemo.experimental.datapipes.healda.configs.sensors import SENSOR_OFFSET
 from physicsnemo.experimental.datapipes.healda.transforms.obs_filtering import (
     filter_observations,
 )
+
+pa = pytest.importorskip("pyarrow")
 
 
 def _make_filter_test_table():
@@ -38,7 +38,6 @@ def _make_filter_test_table():
         conv_offset + 6,
         conv_offset + 7,
     ]
-    n = len(channels)
 
     return pa.table(
         {

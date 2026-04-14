@@ -17,12 +17,9 @@
 
 import datetime
 
-import pytest
-
-cftime = pytest.importorskip("cftime")
-
 import numpy as np
 import pandas as pd
+import pytest
 
 from physicsnemo.experimental.datapipes.healda.time_utils import (
     as_cftime,
@@ -30,6 +27,8 @@ from physicsnemo.experimental.datapipes.healda.time_utils import (
     as_pydatetime,
     as_timestamp,
 )
+
+cftime = pytest.importorskip("cftime")
 
 
 def test_as_numpy_from_pandas_index():

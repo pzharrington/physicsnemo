@@ -15,8 +15,6 @@
 # limitations under the License.
 """Tests for RestartableDistributedSampler."""
 
-import pytest
-
 from physicsnemo.experimental.datapipes.healda.samplers import (
     RestartableDistributedSampler,
 )
@@ -56,10 +54,8 @@ def test_restart_resumes_correctly():
     sampler = RestartableDistributedSampler(dataset, rank=0, num_replicas=1, seed=42)
     sampler.set_epoch(0)
 
-    # Collect first 20 indices
-    first_20 = []
-    for _ in range(20):
-        first_20.append(next(sampler))
+    # Consume first 20 indices
+    _ = [next(sampler) for _ in range(20)]
 
     # Collect remaining
     remaining = []
