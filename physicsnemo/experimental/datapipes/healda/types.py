@@ -161,12 +161,10 @@ class UnifiedObservation:
     global_channel: torch.Tensor
 
     hpx_level: int  # HEALPix level that ``pix`` is defined at
+    global_platform: torch.Tensor | None = None
 
     lengths: torch.Tensor | None = (
         None  # 3D: (n_active_sensors, batch, time) per-window obs counts
-    )
-    sensor_id_to_local: torch.Tensor | None = (
-        None  # (max_sensor_id+1,) map: sensor_id -> local_idx (-1 if inactive)
     )
 
     @classmethod
@@ -186,9 +184,9 @@ class UnifiedObservation:
             platform=torch.empty(0, dtype=torch.long, device=device),
             obs_type=torch.empty(0, dtype=torch.long, device=device),
             global_channel=torch.empty(0, dtype=torch.long, device=device),
-            lengths=torch.zeros(1, B, T, dtype=torch.long, device=device),
-            sensor_id_to_local=torch.zeros(1, dtype=torch.long, device=device),
+            global_platform=torch.empty(0, dtype=torch.long, device=device),
             hpx_level=hpx_level,
+            lengths=torch.zeros(1, B, T, dtype=torch.long, device=device),
         )
 
     @property
@@ -221,8 +219,8 @@ class UnifiedObservation:
             obs_type=_move(self.obs_type),
             global_channel=_move(self.global_channel),
             hpx_level=self.hpx_level,
+            global_platform=_move(self.global_platform),
             lengths=_move(self.lengths),
-            sensor_id_to_local=_move(self.sensor_id_to_local),
         )
 
 
@@ -286,15 +284,14 @@ def split_by_sensor(
 ) -> dict[int, UnifiedObservation]:
     """Slice a ``UnifiedObservation`` into per-sensor sub-objects.
 
-    Uses precomputed ``lengths`` and ``sensor_id_to_local`` for efficient
-    splitting without per-element sensor ID checks.
+    ``target_sensor_ids`` must list sensor IDs in the same order as the
+    sensor dimension (S) of ``obs.lengths``.  Position ``s_local`` in
+    ``target_sensor_ids`` corresponds to index ``s_local`` in ``lengths[S]``.
     """
-    if obs.lengths is None or obs.sensor_id_to_local is None:
+    if obs.lengths is None:
         raise ValueError("lengths is required for split_by_sensor")
 
     lengths = obs.lengths  # [S, B, T]
-    sensor_id_to_local = obs.sensor_id_to_local
-
     device = obs.obs.device
     B, T = obs.batch_dims
 
@@ -309,21 +306,19 @@ def split_by_sensor(
         obs.obs_type,
         obs.global_channel,
     ]
+    if obs.global_platform is not None:
+        obs_fields.append(obs.global_platform)
     splits = [torch.split(f, sizes) for f in obs_fields]
+    global_platform_idx = 8 if obs.global_platform is not None else None
+
+    if len(target_sensor_ids) < len(sizes):
+        raise ValueError(
+            "target_sensor_ids must include the configured sensor order for split_by_sensor"
+        )
 
     out = {}
-    for sensor_id in target_sensor_ids:
-        if sensor_id < len(sensor_id_to_local):
-            s_local = int(sensor_id_to_local[sensor_id].item())
-        else:
-            s_local = -1
-
-        single_sensor_map = torch.full(
-            (sensor_id + 1,), -1, dtype=torch.int32, device=device
-        )
-        single_sensor_map[sensor_id] = 0
-
-        if s_local < 0:
+    for s_local, sensor_id in enumerate(target_sensor_ids):
+        if s_local >= len(sizes):
             sensor_lengths = torch.zeros((1, B, T), dtype=lengths.dtype, device=device)
             out[sensor_id] = UnifiedObservation(
                 obs=obs.obs[:0],
@@ -334,9 +329,11 @@ def split_by_sensor(
                 platform=obs.platform[:0],
                 obs_type=obs.obs_type[:0],
                 global_channel=obs.global_channel[:0],
+                global_platform=(
+                    obs.global_platform[:0] if obs.global_platform is not None else None
+                ),
                 hpx_level=obs.hpx_level,
                 lengths=sensor_lengths,
-                sensor_id_to_local=single_sensor_map,
             )
         else:
             out[sensor_id] = UnifiedObservation(
@@ -348,9 +345,13 @@ def split_by_sensor(
                 platform=splits[5][s_local],
                 obs_type=splits[6][s_local],
                 global_channel=splits[7][s_local],
+                global_platform=(
+                    splits[global_platform_idx][s_local]
+                    if global_platform_idx is not None
+                    else None
+                ),
                 hpx_level=obs.hpx_level,
                 lengths=lengths[s_local : s_local + 1],
-                sensor_id_to_local=single_sensor_map,
             )
 
     return out

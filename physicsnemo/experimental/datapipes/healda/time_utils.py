@@ -68,3 +68,33 @@ def as_cftime(timestamp) -> cftime.DatetimeGregorian:
         timestamp.minute,
         timestamp.second,
     )
+
+
+# ---------------------------------------------------------------------------
+# cftime-based time encodings (used by transforms)
+# ---------------------------------------------------------------------------
+
+
+def cftime_to_timestamp(time: cftime.datetime) -> float:
+    """Convert a cftime datetime to a Unix timestamp (seconds since epoch)."""
+    return datetime.datetime(
+        *cftime.to_tuple(time), tzinfo=datetime.timezone.utc
+    ).timestamp()
+
+
+def compute_second_of_day(time: cftime.datetime) -> float:
+    """Return seconds elapsed since midnight for *time*."""
+    day_start = time.replace(hour=0, minute=0, second=0)
+    return (time - day_start) / datetime.timedelta(seconds=1)
+
+
+def compute_day_of_year(time: cftime.datetime) -> float:
+    """Return fractional day-of-year for *time*."""
+    day_start = time.replace(hour=0, minute=0, second=0)
+    year_start = day_start.replace(month=1, day=1)
+    return (time - year_start) / datetime.timedelta(seconds=86400)
+
+
+def compute_timestamp(time: cftime.datetime) -> int:
+    """Return integer Unix timestamp for *time*."""
+    return int(cftime_to_timestamp(time))

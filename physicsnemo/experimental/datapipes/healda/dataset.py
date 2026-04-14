@@ -189,3 +189,14 @@ class ObsERA5Dataset(torch.utils.data.Dataset):
         """
         times, objs = zip(*[self.get(i) for i in indexes])
         return self.transform.transform(times, objs)
+
+
+def identity_collate(obj):
+    """Identity collate function for use with ``ObsERA5Dataset``.
+
+    Since ``__getitems__`` already returns an assembled batch dict, no
+    collation is needed.  Pass this as ``collate_fn`` to the DataLoader::
+
+        DataLoader(dataset, sampler=sampler, collate_fn=identity_collate)
+    """
+    return obj

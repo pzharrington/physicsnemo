@@ -51,10 +51,6 @@ def make_realistic_obs(
                     if obs[0] == s_id and obs[1] == b and obs[2] == t
                 )
 
-    sensor_id_to_local = torch.full((max(sensors) + 1,), -1, dtype=torch.int32)
-    for local_idx, s_id in enumerate(sensors):
-        sensor_id_to_local[s_id] = local_idx
-
     nobs = len(all_obs)
     return UnifiedObservation(
         obs=values.unsqueeze(1).expand(nobs, 3),
@@ -65,9 +61,9 @@ def make_realistic_obs(
         platform=torch.zeros(nobs, dtype=torch.long),
         obs_type=torch.zeros(nobs, dtype=torch.long),
         global_channel=torch.zeros(nobs, dtype=torch.long),
+        global_platform=torch.zeros(nobs, dtype=torch.long),
         hpx_level=6,
         lengths=lengths_3d,
-        sensor_id_to_local=sensor_id_to_local,
     )
 
 
@@ -102,7 +98,9 @@ def test_split_lengths_match_obs_count():
 
 
 def test_split_empty_sensor():
+    """Extra sensor_ids beyond the configured list produce empty sub-objects."""
     obs = make_realistic_obs(B=1, T=1, sensors=[0, 1])
+    # target_sensor_ids must include the configured order first, extras appended
     split = split_by_sensor(obs, [0, 1, 2])
 
     assert split[2].obs.shape[0] == 0
@@ -121,7 +119,6 @@ def test_split_requires_lengths():
         global_channel=torch.zeros(10, dtype=torch.long),
         hpx_level=6,
         lengths=None,
-        sensor_id_to_local=None,
     )
 
     with pytest.raises(ValueError, match="lengths is required"):
@@ -150,10 +147,6 @@ def test_split_handles_sparse_windows():
     lengths_3d[0, :, :] = 2
     lengths_3d[1, 1, 2] = 3
 
-    sensor_id_to_local = torch.full((5,), -1, dtype=torch.int32)
-    for local_idx, s_id in enumerate(sensors):
-        sensor_id_to_local[s_id] = local_idx
-
     obs = UnifiedObservation(
         obs=torch.arange(nobs, dtype=torch.float32).unsqueeze(1).expand(nobs, 3),
         time=torch.zeros(nobs, dtype=torch.long),
@@ -165,13 +158,15 @@ def test_split_handles_sparse_windows():
         platform=torch.zeros(nobs, dtype=torch.long),
         obs_type=torch.zeros(nobs, dtype=torch.long),
         global_channel=torch.zeros(nobs, dtype=torch.long),
+        global_platform=torch.zeros(nobs, dtype=torch.long),
         hpx_level=6,
         lengths=lengths_3d,
-        sensor_id_to_local=sensor_id_to_local,
     )
 
     assert obs.batch_dims == (2, 3)
 
+    # Positional: target_sensor_ids[0]=0 -> lengths[0], target_sensor_ids[1]=4 -> lengths[1]
+    # Extra sensor 99 is beyond len(sizes) -> empty
     split = split_by_sensor(obs, [0, 4, 99])
 
     s0 = split[0]
@@ -186,3 +181,12 @@ def test_split_handles_sparse_windows():
     s99 = split[99]
     assert s99.obs.shape[0] == 0
     assert torch.all(s99.lengths == 0)
+
+
+def test_split_global_platform_propagated():
+    """global_platform is sliced correctly through split_by_sensor."""
+    obs = make_realistic_obs(B=1, T=1, sensors=[0, 1])
+    split = split_by_sensor(obs, [0, 1])
+    for sid in [0, 1]:
+        assert split[sid].global_platform is not None
+        assert split[sid].global_platform.shape[0] == split[sid].obs.shape[0]

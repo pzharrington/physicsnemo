@@ -16,7 +16,9 @@
 """Tests for observation quality-control filtering."""
 
 import numpy as np
-import pyarrow as pa
+import pytest
+
+pa = pytest.importorskip("pyarrow")
 
 from physicsnemo.experimental.datapipes.healda.configs.sensors import SENSOR_OFFSET
 from physicsnemo.experimental.datapipes.healda.transforms.obs_filtering import (

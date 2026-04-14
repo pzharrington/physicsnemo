@@ -15,7 +15,9 @@
 # limitations under the License.
 """Tests for the combined observation schema and sensor config consistency."""
 
-import pyarrow as pa
+import pytest
+
+pa = pytest.importorskip("pyarrow")
 
 from physicsnemo.experimental.datapipes.healda.configs.combined_schema import (
     get_channel_table_schema,

@@ -1,15 +1,12 @@
 # HealDA — AI-based Data Assimilation on the HEALPix Grid
 
-> **This recipe is under active construction.**
+> **🏗️ This recipe is under active construction. 🏗️**
 > Structure and functionality are subject to changes.
 
 HealDA is a stateless assimilation model that produces a single
 global weather analysis from conventional and satellite
 observations. It operates on a HEALPix level-6 padded XY grid
 and outputs ERA5-compatible atmospheric variables.
-
-This example provides a recipe to train HealDA, with support
-for extension to custom data.
 
 ## Setup
 
@@ -36,11 +33,9 @@ ObsERA5Dataset(era5_data, obs_loader, transform)
   |  Temporal windowing via FrameIndexGenerator
   |  __getitems__ -> get() per index -> transform.transform()
   v
-ChunkedDistributedSampler (contiguous chunks for cache locality)
+RestartableDistributedSampler (stateful distributed sampling with checkpointing)
   |
-DataLoader (1 worker each, pin_memory, persistent_workers)
-  |
-RoundRobinLoader (interleaves per-worker DataLoaders)
+DataLoader (pin_memory, persistent_workers)
   |
 prefetch_map(loader, transform.device_transform)
   |
@@ -83,8 +78,7 @@ class MyTransform:
 | `UFSUnifiedLoader` | `loaders.ufs_obs` | Parquet obs loader |
 | `ERA5Loader` | `loaders.era5` | Async ERA5 zarr loader |
 | `ERA5ObsTransform` | `transforms.era5_obs` | Two-stage transform |
-| `ChunkedDistributedSampler` | `samplers` | Distributed sampler |
-| `RoundRobinLoader` | `samplers` | Multi-loader interleave |
+| `RestartableDistributedSampler` | `samplers` | Stateful distributed sampler |
 | `prefetch_map` | `prefetch` | CUDA stream prefetching |
 
 All modules above are under
@@ -125,7 +119,84 @@ from physicsnemo.experimental.datapipes.healda.configs.variable_configs import (
 dataset = ObsERA5Dataset(
     era5_data=era5_xr["data"],
     obs_loader=GOESRadianceLoader(...),
-    transform=ERA5ObsTransform(...),
+    transform=ERA5ObsTransform(sensors=["goes"], ...),
     variable_config=VARIABLE_CONFIGS["era5"],
 )
+```
+
+### Putting It Together
+
+A complete training pipeline wires together all the
+components — dataset, sampler, DataLoader, and GPU prefetch:
+
+```python
+import torch
+from torch.utils.data import DataLoader
+
+from physicsnemo.experimental.datapipes.healda import (
+    ObsERA5Dataset,
+    RestartableDistributedSampler,
+    identity_collate,
+    prefetch_map,
+)
+from physicsnemo.experimental.datapipes.healda.loaders.ufs_obs import (
+    UFSUnifiedLoader,
+)
+from physicsnemo.experimental.datapipes.healda.transforms.era5_obs import (
+    ERA5ObsTransform,
+)
+from physicsnemo.experimental.datapipes.healda.configs.variable_configs import (
+    VARIABLE_CONFIGS,
+)
+
+sensors = ["atms", "mhs", "conv"]
+
+# 1. Build loaders
+obs_loader = UFSUnifiedLoader(
+    data_path="/path/to/processed_obs",
+    sensors=sensors,
+    normalization="zscore",
+    obs_context_hours=(-21, 3),
+)
+transform = ERA5ObsTransform(
+    variable_config=VARIABLE_CONFIGS["era5"],
+    sensors=sensors,
+)
+
+# 2. Build dataset
+dataset = ObsERA5Dataset(
+    era5_data=era5_xr["data"],
+    obs_loader=obs_loader,
+    transform=transform,
+    variable_config=VARIABLE_CONFIGS["era5"],
+    split="train",
+)
+
+# 3. Sampler + DataLoader
+sampler = RestartableDistributedSampler(
+    dataset, rank=rank, num_replicas=world_size,
+)
+sampler.set_epoch(0)
+dataloader = DataLoader(
+    dataset,
+    sampler=sampler,
+    batch_size=2,
+    num_workers=8,
+    collate_fn=identity_collate,
+    pin_memory=True,
+    persistent_workers=True,
+)
+
+# 4. GPU prefetch (hides CPU→GPU transfer behind training)
+device = torch.device("cuda")
+loader = prefetch_map(
+    dataloader,
+    lambda batch: transform.device_transform(batch, device),
+    queue_size=1,
+)
+
+# 5. Training loop — batches arrive GPU-ready
+for batch in loader:
+    loss = model(batch)
+    ...
 ```

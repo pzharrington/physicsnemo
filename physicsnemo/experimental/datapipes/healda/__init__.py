@@ -25,8 +25,7 @@ Key entry points:
 - :class:`UFSUnifiedLoader` — parquet-based observation loader
 - :class:`ERA5ObsTransform` — two-stage transform with Triton feature kernels
 - :func:`prefetch_map` — background CUDA stream prefetching
-- :class:`ChunkedDistributedSampler` — cache-friendly distributed sampler
-- :class:`RoundRobinLoader` — multi-loader round-robin interleaving
+- :class:`RestartableDistributedSampler` — stateful distributed sampler with checkpoint support
 
 Protocols for custom loaders/transforms:
 
@@ -35,12 +34,9 @@ Protocols for custom loaders/transforms:
 - :class:`DeviceTransform` — GPU-side batch transform
 """
 
-from physicsnemo.experimental.datapipes.healda.dataset import ObsERA5Dataset
-from physicsnemo.experimental.datapipes.healda.indexing import (
-    FrameIndexGenerator,
-    MultiCoordIndex,
-    get_flat_indexer,
-    split_array_contiguous,
+from physicsnemo.experimental.datapipes.healda.dataset import (
+    ObsERA5Dataset,
+    identity_collate,
 )
 from physicsnemo.experimental.datapipes.healda.prefetch import prefetch_map
 from physicsnemo.experimental.datapipes.healda.protocols import (
@@ -49,8 +45,7 @@ from physicsnemo.experimental.datapipes.healda.protocols import (
     Transform,
 )
 from physicsnemo.experimental.datapipes.healda.samplers import (
-    ChunkedDistributedSampler,
-    RoundRobinLoader,
+    RestartableDistributedSampler,
 )
 from physicsnemo.experimental.datapipes.healda.types import (
     Batch,
@@ -79,10 +74,6 @@ __all__ = [
     "split_by_sensor",
     # Infrastructure
     "prefetch_map",
-    "ChunkedDistributedSampler",
-    "RoundRobinLoader",
-    "FrameIndexGenerator",
-    "MultiCoordIndex",
-    "get_flat_indexer",
-    "split_array_contiguous",
+    "RestartableDistributedSampler",
+    "identity_collate",
 ]

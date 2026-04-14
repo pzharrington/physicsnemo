@@ -27,11 +27,9 @@ protocols:
 """
 
 import dataclasses
-import datetime
 import functools
 import warnings
 
-import cftime
 import numpy as np
 import torch
 
@@ -41,9 +39,20 @@ earth2grid = OptionalImport("earth2grid")
 pa = OptionalImport("pyarrow")
 pc = OptionalImport("pyarrow.compute")
 
+from physicsnemo.experimental.datapipes.healda.configs.sensors import (
+    NPLATFORMS,
+    PLATFORM_NAME_TO_ID,
+    SENSOR_CONFIGS,
+    SENSOR_NAME_TO_ID,
+)
 from physicsnemo.experimental.datapipes.healda.configs.static_data import load_lfrac, load_orography
 from physicsnemo.experimental.datapipes.healda.configs.variable_configs import VARIABLE_CONFIGS
 from physicsnemo.experimental.datapipes.healda.loaders.era5 import get_batch_info
+from physicsnemo.experimental.datapipes.healda.time_utils import (
+    compute_day_of_year,
+    compute_second_of_day,
+    compute_timestamp,
+)
 from physicsnemo.experimental.datapipes.healda.transforms import obs_features, obs_features_ext
 from physicsnemo.experimental.datapipes.healda.types import UnifiedObservation, VariableConfig
 
@@ -53,12 +62,6 @@ warnings.filterwarnings(
 )
 
 
-def _cftime_to_timestamp(time: cftime.DatetimeGregorian) -> float:
-    return datetime.datetime(
-        *cftime.to_tuple(time), tzinfo=datetime.timezone.utc
-    ).timestamp()
-
-
 def _reorder_nest_to_hpxpad(x):
     x = torch.as_tensor(x)
     src_order = earth2grid.healpix.NEST
@@ -66,25 +69,10 @@ def _reorder_nest_to_hpxpad(x):
     return earth2grid.healpix.reorder(x, src_order, dst_order)
 
 
-def _compute_second_of_day(time: cftime.datetime):
-    day_start = time.replace(hour=0, minute=0, second=0)
-    return (time - day_start) / datetime.timedelta(seconds=1)
-
-
-def _compute_day_of_year(time: cftime.datetime):
-    day_start = time.replace(hour=0, minute=0, second=0)
-    year_start = day_start.replace(month=1, day=1)
-    return (time - year_start) / datetime.timedelta(seconds=86400)
-
-
-def _compute_timestamp(time: cftime.datetime):
-    return int(_cftime_to_timestamp(time))
-
-
 def _get_static_condition(HPX_LEVEL, variable_config) -> torch.Tensor:
     lfrac = load_lfrac(HPX_LEVEL)
     orography = load_orography()
-    # Global mean and std computed over the UFS HEALPix level-6 training data.
+    # Precomputed global mean/std over the UFS HEALPix level-6 grid (2000–2023 ERA5).
     orog_scale, orog_mean = 627.3885284872, 232.56013904090733
     lfrac_scale, lfrac_mean = 0.4695501683565522, 0.3410480857539571
     data = {
@@ -94,6 +82,30 @@ def _get_static_condition(HPX_LEVEL, variable_config) -> torch.Tensor:
     arrays = [torch.as_tensor(data[name]) for name in variable_config.variables_static]
     array = torch.stack(arrays).float()  # c x
     return array.unsqueeze(1)
+
+
+def _map_platform_to_local(
+    platform: torch.Tensor,
+    lengths: torch.Tensor,
+    ordered_sensor_ids: torch.Tensor,
+    platform_luts: dict[int, torch.Tensor],
+    device: torch.device,
+) -> torch.Tensor:
+    local_platform = torch.zeros_like(platform)
+    prev_end = 0
+    for s_local, sensor_id in enumerate(ordered_sensor_ids.tolist()):
+        count = int(lengths[s_local].sum().item())
+        end = prev_end + count
+        if end <= prev_end:
+            continue
+        lut = platform_luts.get(sensor_id)
+        if lut is None:
+            raise ValueError(f"Missing platform lookup table for sensor_id={sensor_id}")
+        lut = lut.to(device)
+        sensor_platform = platform[prev_end:end].long().clamp_(0, lut.shape[0] - 1)
+        local_platform[prev_end:end] = lut[sensor_platform]
+        prev_end = end
+    return local_platform
 
 
 @dataclasses.dataclass
@@ -108,12 +120,17 @@ class ERA5ObsTransform:
         hpx_level_condition: HEALPix level for static conditioning data.
         extended_features: Whether to use extended (30-feature) observation
             encoding instead of the standard 28-feature encoding.
+        sensors: Ordered list of sensor names (keys of ``SENSOR_CONFIGS``,
+            e.g. ``["atms", "mhs", "conv"]``).  Controls observation
+            grouping in the ``lengths`` tensor and per-sensor platform ID
+            remapping.  Must match the sensors passed to the obs loader.
     """
 
     variable_config: VariableConfig = VARIABLE_CONFIGS["era5"]
     hpx_level: int = 10
     hpx_level_condition: int = 6
     extended_features: bool = False
+    sensors: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         batch_info = get_batch_info(self.variable_config)
@@ -123,8 +140,31 @@ class ERA5ObsTransform:
     @functools.cached_property
     def _grid(self):
         return earth2grid.healpix.Grid(
-            self.hpx_level, pixel_order=earth2grid.healpix.NEST
+            self.hpx_level, pixel_order=earth2grid.healpix.HEALPIX_PAD_XY
         )
+
+    @functools.cached_property
+    def _ordered_sensor_ids(self) -> torch.Tensor:
+        if not self.sensors:
+            return torch.zeros((0,), dtype=torch.int32)
+        return torch.tensor(
+            [SENSOR_NAME_TO_ID[sensor_name] for sensor_name in self.sensors],
+            dtype=torch.int32,
+        )
+
+    @functools.cached_property
+    def _platform_luts(self) -> dict[int, torch.Tensor]:
+        luts: dict[int, torch.Tensor] = {}
+        for sensor_name in self.sensors:
+            sensor_id = SENSOR_NAME_TO_ID[sensor_name]
+            platform_ids = [
+                PLATFORM_NAME_TO_ID[p] for p in SENSOR_CONFIGS[sensor_name].platforms
+            ]
+            lut = torch.zeros(NPLATFORMS, dtype=torch.long)
+            for local_platform_id, global_platform_id in enumerate(platform_ids):
+                lut[global_platform_id] = local_platform_id
+            luts[sensor_id] = lut
+        return luts
 
     # ------------------------------------------------------------------
     # Obs processing helpers
@@ -173,9 +213,10 @@ class ERA5ObsTransform:
         return out
 
     @staticmethod
-    def _build_observation_lengths_3d(obs_table: pa.Table, frame_times):
+    def _build_observation_lengths_3d(
+        obs_table: pa.Table, frame_times, ordered_sensor_ids: torch.Tensor
+    ):
         B, T = len(frame_times), len(frame_times[0])
-        sensor_ids = set()
         counts_map = {}
 
         for batch in obs_table.to_batches():
@@ -185,46 +226,40 @@ class ERA5ObsTransform:
             b_id = int(batch["batch_idx"][0].as_py())
             t_id = int(batch["time_idx"][0].as_py())
             n = batch.num_rows
-            sensor_ids.add(s_id)
             if s_id not in counts_map:
                 counts_map[s_id] = torch.zeros((B, T), dtype=torch.int32)
             counts_map[s_id][b_id, t_id] += n
 
-        active_sensor_ids = sorted(sensor_ids)
-        S = len(active_sensor_ids)
+        S = int(ordered_sensor_ids.numel())
+        if S == 0:
+            return torch.zeros((0, B, T), dtype=torch.int32)
 
-        if not sensor_ids:
-            lengths_3d = torch.zeros((0, B, T), dtype=torch.int32)
-            sensor_id_to_local = torch.zeros((0,), dtype=torch.int32)
-            return lengths_3d, sensor_id_to_local
-
-        max_sensor_id = max(sensor_ids)
         lengths_3d = torch.zeros((S, B, T), dtype=torch.int32)
-        for s_local, s_id in enumerate(active_sensor_ids):
-            lengths_3d[s_local] = counts_map[s_id]
+        for s_local, s_id in enumerate(ordered_sensor_ids.tolist()):
+            if s_id in counts_map:
+                lengths_3d[s_local] = counts_map[s_id]
 
-        sensor_id_to_local = torch.full((max_sensor_id + 1,), -1, dtype=torch.int32)
-        for local_idx, sensor_id in enumerate(active_sensor_ids):
-            sensor_id_to_local[sensor_id] = local_idx
-
-        return lengths_3d, sensor_id_to_local
+        return lengths_3d
 
     def _process_obs(self, target_times, frames):
+        if not self.sensors:
+            raise ValueError("ERA5ObsTransform requires configured sensors.")
+
         all_obs_with_indices = []
         for b_idx, sample_frames in enumerate(frames):
             for t_idx, frame_dict in enumerate(sample_frames):
                 table = frame_dict["obs"]
                 table_with_indices = self._append_batch_time_info_chunked(
                     table, b_idx, t_idx,
-                    _compute_timestamp(target_times[b_idx][t_idx]),
+                    compute_timestamp(target_times[b_idx][t_idx]),
                 )
                 all_obs_with_indices.append(table_with_indices)
 
         obs = pa.concat_tables(all_obs_with_indices)
         obs = self._sort_by_record_batch(obs, "sensor_id")
 
-        lengths_3d, sensor_id_to_local = self._build_observation_lengths_3d(
-            obs, target_times
+        lengths_3d = self._build_observation_lengths_3d(
+            obs, target_times, self._ordered_sensor_ids
         )
 
         obs_tensors = {}
@@ -254,7 +289,7 @@ class ERA5ObsTransform:
         obs_type = pc.fill_null(obs["Observation_Type"], 0)
         obs_tensors["observation_type"] = torch.from_numpy(obs_type.to_numpy())
 
-        return obs_tensors, lengths_3d, sensor_id_to_local
+        return (obs_tensors, lengths_3d)
 
     def _get_target(self, frames) -> torch.Tensor:
         all_state = [f["state"] for sample in frames for f in sample]
@@ -298,9 +333,9 @@ class ERA5ObsTransform:
         if "obs" in frames[0][0].keys():
             out["unified_obs"] = self._process_obs(times, frames)
         out["target"] = self._get_target(frames).float()
-        out["second_of_day"] = _apply_time_func(_compute_second_of_day).float()
-        out["day_of_year"] = _apply_time_func(_compute_day_of_year).float()
-        out["timestamp"] = _apply_time_func(_compute_timestamp)
+        out["second_of_day"] = _apply_time_func(compute_second_of_day).float()
+        out["day_of_year"] = _apply_time_func(compute_day_of_year).float()
+        out["timestamp"] = _apply_time_func(compute_timestamp)
         b, _, t, _ = out["target"].shape
         condition = self._static_condition.float()
         if condition.shape[0] not in (1, b):
@@ -338,17 +373,15 @@ class ERA5ObsTransform:
         out = {}
         for key in batch:
             if key == "unified_obs":
-                obs_tensors, lengths, sensor_id_to_local = batch["unified_obs"]
+                obs_tensors, lengths = batch["unified_obs"]
                 out[key] = self._device_transform_unified_obs(
-                    obs_tensors, lengths, sensor_id_to_local, device
+                    obs_tensors, lengths, device
                 )
             else:
                 out[key] = batch[key].to(device, non_blocking=True)
         return out
 
-    def _device_transform_unified_obs(
-        self, obs_tensors, lengths, sensor_id_to_local, device
-    ):
+    def _device_transform_unified_obs(self, obs_tensors, lengths, device):
         def _to_device(tensor, non_blocking=True):
             if isinstance(tensor, torch.Tensor):
                 return tensor.to(device, non_blocking=non_blocking)
@@ -396,21 +429,25 @@ class ERA5ObsTransform:
                 sol_zenith_angle=sol_zenith_tensor,
             )
 
+        lengths = _to_device(lengths)
+        local_platform = _map_platform_to_local(
+            platform=platform_id_tensor,
+            lengths=lengths,
+            ordered_sensor_ids=self._ordered_sensor_ids.to(device),
+            platform_luts=self._platform_luts,
+            device=device,
+        )
+
         return UnifiedObservation(
             obs=observation_tensor,
             time=obs_time_ns,
             float_metadata=meta,
             pix=pix,
             local_channel=local_channel_id_tensor,
-            platform=platform_id_tensor,
+            platform=local_platform,
             obs_type=obs_type_tensor,
             global_channel=global_channel_id_tensor,
+            global_platform=platform_id_tensor,
             hpx_level=self.hpx_level,
-            lengths=_to_device(lengths),
-            sensor_id_to_local=_to_device(sensor_id_to_local),
+            lengths=lengths,
         )
-
-
-def identity_collate(obj):
-    """Identity collate function — batch is already assembled by __getitems__."""
-    return obj

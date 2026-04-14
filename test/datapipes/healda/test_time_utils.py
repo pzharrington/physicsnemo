@@ -17,7 +17,10 @@
 
 import datetime
 
-import cftime
+import pytest
+
+cftime = pytest.importorskip("cftime")
+
 import numpy as np
 import pandas as pd
 

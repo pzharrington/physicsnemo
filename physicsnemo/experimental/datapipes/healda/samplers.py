@@ -13,167 +13,79 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Samplers and multi-loader utilities for cache-friendly distributed training.
+"""Stateful distributed sampler with checkpoint support.
 
-``ChunkedDistributedSampler`` yields indices in contiguous chunks so that
-data backed by chunked storage (e.g. zarr) benefits from sequential I/O.
-
-``RoundRobinLoader`` interleaves multiple DataLoaders — typically one per
-worker, each with its own ``ChunkedDistributedSampler`` — to provide an
-iterable-style interface over map-style datasets with per-worker chunk
-affinity.
+``RestartableDistributedSampler`` is a distributed sampler that tracks its
+iteration state so that training can be resumed from a checkpoint without
+replaying already-seen samples.
 """
 
-import random
-
 import torch
-import torch.distributed
 import torch.utils.data
 
 
-# ---------------------------------------------------------------------------
-# Chunked distributed sampler
-# ---------------------------------------------------------------------------
+class RestartableDistributedSampler(torch.utils.data.Sampler):
+    """A stateful distributed sampler that automatically loops over the dataset.
 
-
-class ChunkedDistributedSampler(torch.utils.data.Sampler):
-    """A distributed sampler that yields indices in contiguous chunks.
-
-    Within each chunk, indices are sequential (optionally shuffled within the
-    chunk).  Chunks themselves can be shuffled across epochs.  This pattern is
-    critical when the underlying dataset caches data at chunk granularity, as
-    it ensures sequential access within each cache window.
-
-    The sampler is infinite: after exhausting all chunks it advances the epoch
-    and re-shuffles.
+    Each epoch generates a rank-specific random permutation.  The sampler
+    tracks its position within the permutation so that ``restart()`` can
+    resume from an exact checkpoint.
 
     Args:
-        dataset: Map-style dataset.
-        chunk_size: Number of contiguous indices per chunk.
+        dataset: Map-style dataset (used only for ``len``).
         rank: This worker's global rank.
-        num_replicas: Total number of workers (data-parallel * per-GPU workers).
-        shuffle: Whether to shuffle the order of chunks.
-        shuffle_within_chunk: Whether to shuffle indices within each chunk.
-        drop_last: Whether to drop incomplete trailing chunks.
-        seed: Random seed (broadcast from rank 0 when distributed).
-        sampler_fn: Optional custom sampler over chunk indices.
+        num_replicas: Total number of data-parallel workers.
+        shuffle: Whether to shuffle (always True in practice).
+        drop_last: Drop remainder so all ranks get the same count.
+        seed: Base random seed.
     """
 
     def __init__(
         self,
         dataset: torch.utils.data.Dataset,
-        chunk_size: int = 1,
         rank=0,
         num_replicas=1,
-        shuffle=False,
-        shuffle_within_chunk=False,
+        shuffle=True,
         drop_last=True,
         seed=42,
-        sampler_fn=None,
     ):
         super().__init__()
-        self.n = len(dataset)
-        nchunks = self.n // chunk_size
-        chunks = list(range(nchunks))
-
-        if torch.distributed.is_initialized():
-            seed = torch.tensor(seed).cuda()
-            torch.distributed.broadcast(seed, src=0)
-            seed = seed.item()
-
-        self._chunk_sampler = (
-            sampler_fn(chunks)
-            if sampler_fn is not None
-            else torch.utils.data.DistributedSampler(
-                chunks,
-                num_replicas=num_replicas,
-                rank=rank,
-                shuffle=shuffle,
-                seed=seed,
-                drop_last=drop_last,
-            )
-        )
-        self.chunk_size = chunk_size
-        self.shuffle_within_chunk = shuffle_within_chunk
-        self.seed = seed
-        self.rank = rank
+        self.iteration = 0
         self.epoch = 0
-        self.index_within_chunk = 0
-        self._chunk_iter = iter(self._chunk_sampler)
-        self._current_chunk_indices = None
-
-        if self.shuffle_within_chunk:
-            self.rng = random.Random(seed + rank)
-
-    def set_epoch(self, epoch):
-        try:
-            self._chunk_sampler.set_epoch(epoch)
-        except AttributeError:
-            pass
-        self.epoch = epoch
+        self.len = len(dataset)
+        self.seed = seed
+        self.permutation = None
+        self.rank = rank
+        self.num_replicas = num_replicas
 
     def __len__(self):
-        return self.n
+        return self.len // self.num_replicas
+
+    def set_epoch(self, epoch):
+        self.epoch = epoch
+        self.iteration = 0
+        rng = torch.Generator().manual_seed(self.seed + self.epoch + self.rank)
+        permutation = torch.randperm(self.len, generator=rng)
+
+        rem = self.len % self.num_replicas
+        if rem > 0:
+            permutation = permutation[:-rem]
+        self.permutation = permutation[self.rank :: self.num_replicas]
+
+    def restart(self, epoch, iteration, seed=None):
+        """Resume from a checkpoint."""
+        self.seed = seed or self.seed
+        self.set_epoch(epoch)
+        self.iteration = iteration
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        if self.index_within_chunk == 0:
-            try:
-                self.active_chunk = next(self._chunk_iter)
-            except StopIteration:
-                self.set_epoch(self.epoch + 1)
-                self._chunk_iter = iter(self._chunk_sampler)
-                raise StopIteration()
+        if self.iteration >= len(self):
+            self.set_epoch(self.epoch + 1)
+            raise StopIteration()
 
-            chunk_start = self.active_chunk * self.chunk_size
-            self._current_chunk_indices = list(
-                range(chunk_start, chunk_start + self.chunk_size)
-            )
-
-            if self.shuffle_within_chunk:
-                self.rng.shuffle(self._current_chunk_indices)
-
-        i = self._current_chunk_indices[self.index_within_chunk]
-        self.index_within_chunk = (self.index_within_chunk + 1) % self.chunk_size
-        return i
-
-
-# ---------------------------------------------------------------------------
-# Round-robin loader
-# ---------------------------------------------------------------------------
-
-
-class RoundRobinLoader(torch.utils.data.IterableDataset):
-    """Round-robin interleaving of multiple map-style DataLoaders.
-
-    This converts map-style datasets to iterable-style by cycling through
-    the given DataLoaders in round-robin order, removing exhausted ones
-    until all are done.
-
-    Typical usage: create one ``DataLoader`` per worker, each backed by a
-    ``ChunkedDistributedSampler`` with a unique rank, then wrap them with
-    ``RoundRobinLoader``.
-
-    Args:
-        dataloaders: List of DataLoader instances to interleave.
-    """
-
-    def __init__(self, dataloaders: list[torch.utils.data.DataLoader]):
-        super().__init__()
-        self.dataloaders = dataloaders
-
-    def __len__(self):
-        return sum(len(dl) for dl in self.dataloaders)
-
-    def __iter__(self):
-        iterators = [iter(dl) for dl in self.dataloaders]
-        active_indices = list(range(len(self.dataloaders)))
-
-        while active_indices:
-            for idx in list(active_indices):
-                try:
-                    yield next(iterators[idx])
-                except StopIteration:
-                    active_indices.remove(idx)
+        idx = self.permutation[self.iteration].item()
+        self.iteration += 1
+        return idx
