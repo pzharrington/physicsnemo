@@ -16,10 +16,12 @@
 """Tests for prefetch_map background processing."""
 
 import pytest
+import torch
 
 from physicsnemo.experimental.datapipes.healda.prefetch import prefetch_map
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 def test_prefetch_map_basic():
     """Prefetch with a simple doubling transform."""
     data = list(range(10))
@@ -27,6 +29,7 @@ def test_prefetch_map_basic():
     assert list(loader) == list(range(0, 20, 2))
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 def test_prefetch_map_error_propagation():
     """Exceptions in the background thread propagate to the consumer."""
     data = list(range(4))
