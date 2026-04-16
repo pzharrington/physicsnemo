@@ -156,7 +156,7 @@ class UnifiedObservation:
     # Integer metadata (each shape (n_obs,))
     pix: torch.Tensor  # HEALPix pixel index (NEST)
     local_channel: torch.Tensor
-    platform: torch.Tensor
+    local_platform: torch.Tensor
     obs_type: torch.Tensor
     global_channel: torch.Tensor
 
@@ -181,7 +181,7 @@ class UnifiedObservation:
             float_metadata=torch.empty((0, 28), device=device),
             pix=torch.empty(0, dtype=torch.long, device=device),
             local_channel=torch.empty(0, dtype=torch.long, device=device),
-            platform=torch.empty(0, dtype=torch.long, device=device),
+            local_platform=torch.empty(0, dtype=torch.long, device=device),
             obs_type=torch.empty(0, dtype=torch.long, device=device),
             global_channel=torch.empty(0, dtype=torch.long, device=device),
             global_platform=torch.empty(0, dtype=torch.long, device=device),
@@ -215,7 +215,7 @@ class UnifiedObservation:
             float_metadata=_move(self.float_metadata),
             pix=_move(self.pix),
             local_channel=_move(self.local_channel),
-            platform=_move(self.platform),
+            local_platform=_move(self.local_platform),
             obs_type=_move(self.obs_type),
             global_channel=_move(self.global_channel),
             hpx_level=self.hpx_level,
@@ -302,7 +302,7 @@ def split_by_sensor(
         obs.float_metadata,
         obs.pix,
         obs.local_channel,
-        obs.platform,
+        obs.local_platform,
         obs.obs_type,
         obs.global_channel,
     ]
@@ -326,7 +326,7 @@ def split_by_sensor(
                 float_metadata=obs.float_metadata[:0],
                 pix=obs.pix[:0],
                 local_channel=obs.local_channel[:0],
-                platform=obs.platform[:0],
+                local_platform=obs.local_platform[:0],
                 obs_type=obs.obs_type[:0],
                 global_channel=obs.global_channel[:0],
                 global_platform=(
@@ -342,7 +342,7 @@ def split_by_sensor(
                 float_metadata=splits[2][s_local],
                 pix=splits[3][s_local],
                 local_channel=splits[4][s_local],
-                platform=splits[5][s_local],
+                local_platform=splits[5][s_local],
                 obs_type=splits[6][s_local],
                 global_channel=splits[7][s_local],
                 global_platform=(

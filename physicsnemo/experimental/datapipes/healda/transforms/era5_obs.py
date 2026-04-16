@@ -444,7 +444,7 @@ class ERA5ObsTransform:
             float_metadata=meta,
             pix=pix,
             local_channel=local_channel_id_tensor,
-            platform=local_platform,
+            local_platform=local_platform,
             obs_type=obs_type_tensor,
             global_channel=global_channel_id_tensor,
             global_platform=platform_id_tensor,
