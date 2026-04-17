@@ -1,6 +1,4 @@
-# nvidia-physicsnemo[datapipes-extras] 
-cftime
-pyarrow
+nvidia-physicsnemo[healda]
 dotenv
 earth2grid @ git+https://github.com/NVlabs/earth2grid.git@main
 matplotlib
