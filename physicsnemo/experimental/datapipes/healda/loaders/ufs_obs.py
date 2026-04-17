@@ -25,7 +25,6 @@ Example::
         data_path="/path/to/processed_obs",
         sensors=["atms", "mhs", "conv"],
         obs_context_hours=(-3, 3),
-        normalization="zscore",
     )
     result = await loader.sel_time(pd.DatetimeIndex([...]))
     tables = result["obs"]  # list[pa.Table], one per timestamp
@@ -68,7 +67,6 @@ def get_channel_table(data_path: str, filesystem=None):
         data_path,
         sensors=[],
         obs_context_hours=(-3, 3),
-        normalization="zscore",
         filesystem=filesystem,
     ).channel_table
 
@@ -83,7 +81,6 @@ class UFSUnifiedLoader:
         data_path: Path to the processed observation data directory.
         sensors: List of sensor names to load (e.g. ``["atms", "mhs", "conv"]``).
         filesystem: Optional fsspec filesystem for remote access (e.g. S3).
-        normalization: Normalization method (``"fixed_range"`` or ``"zscore"``).
         innovation_type: Innovation type (``"none"``, ``"adjusted"``, ``"unadjusted"``).
         qc_filter: Whether to apply quality-control filtering.
         filter_innovation: Whether to filter based on innovation values.
@@ -100,7 +97,6 @@ class UFSUnifiedLoader:
         data_path: str,
         sensors: List[str],
         filesystem: fsspec.AbstractFileSystem | None = None,
-        normalization: Literal["fixed_range", "zscore"] = "fixed_range",
         innovation_type: Literal["none", "adjusted", "unadjusted"] = "none",
         qc_filter: bool = False,
         filter_innovation: bool = False,
@@ -114,7 +110,6 @@ class UFSUnifiedLoader:
         self.data_path = data_path
         self.sensors = sensors
         self.fs = filesystem
-        self.normalization = normalization
         self.innovation_type = innovation_type
         self.qc_filter = qc_filter
         self.filter_innovation = filter_innovation
@@ -162,7 +157,7 @@ class UFSUnifiedLoader:
         local_channel_ids = []
         offset = 0
         for i in range(len(sensor_id)):
-            if sensor_id[i] != sensor_id[i - 1]:
+            if i == 0 or sensor_id[i] != sensor_id[i - 1]:
                 offset = i
             local_channel_ids.append(i - offset)
         array = pa.array(local_channel_ids).cast(LOCAL_CHANNEL_ID.type)
@@ -203,30 +198,18 @@ class UFSUnifiedLoader:
                     .column(da_idx)
                     .statistics
                 )
-                row_group_lo, row_group_hi = stats.min, stats.max
-
-                this_window = None
-                for w in target_windows:
-                    if row_group_lo <= w <= row_group_hi:
-                        this_window = w
-
-                if this_window is None:
-                    continue
-
-                table = parquet.read_row_group(
-                    row_group_idx, columns=self._read_columns
-                )
-
-                if row_group_lo != row_group_hi:
-                    mask = pc.is_in(
-                        table["DA_window"], pa.array(list(target_windows))
+                row_group_window = stats.min
+                if row_group_window != stats.max:
+                    raise ValueError(
+                        f"Expected one DA_window per row group, got "
+                        f"[{stats.min}, {stats.max}] for {parquet_path} row_group={row_group_idx}"
                     )
-                    table = table.filter(mask)
-
+                if row_group_window not in target_windows:
+                    continue
+                table = parquet.read_row_group(row_group_idx, columns=self._read_columns)
                 if table.num_rows == 0:
                     continue
-
-                yield this_window, table
+                yield row_group_window, table
         except (FileNotFoundError, OSError):
             return
 
@@ -239,15 +222,10 @@ class UFSUnifiedLoader:
         )
 
     def _normalize_observations(self, table: pa.Table) -> pa.Table:
-        if self.normalization == "fixed_range":
-            normalized = pc.divide(pc.subtract(table["Observation"], 0), 400 - 0)
-        elif self.normalization == "zscore":
-            normalized = pc.divide(
-                pc.subtract(table["Observation"], table["mean"]),
-                table["stddev"],
-            )
-        else:
-            raise ValueError(f"Unknown normalization type: {self.normalization}")
+        normalized = pc.divide(
+            pc.subtract(table["Observation"], table["mean"]),
+            table["stddev"],
+        )
         return table.set_column(
             table.schema.get_field_index("Observation"),
             "Observation",

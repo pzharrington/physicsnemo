@@ -155,7 +155,6 @@ sensors = ["atms", "mhs", "conv"]
 obs_loader = UFSUnifiedLoader(
     data_path="/path/to/processed_obs",
     sensors=sensors,
-    normalization="zscore",
     obs_context_hours=(-21, 3),
 )
 transform = ERA5ObsTransform(

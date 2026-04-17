@@ -36,8 +36,8 @@ def split_array_contiguous(x):
     This detects gaps in a time array (e.g. year boundaries, missing data)
     and returns a list of contiguous segments.
     """
-    if x.size == 0:
-        return []
+    if x.size <= 1:
+        return [x] if x.size == 1 else []
 
     d = x[1] - x[0]
     segments = []
@@ -135,10 +135,10 @@ class FrameIndexGenerator:
 
     def _map_logical_to_physical(self, logical_idx: int) -> int:
         """Map a logical sample index to a physical frame index across segments."""
-        if logical_idx >= self.total_samples:
+        if logical_idx >= self.valid_length:
             raise IndexError(
                 f"Sample index {logical_idx} out of bounds "
-                f"for {self.total_samples} samples"
+                f"for {self.valid_length} valid samples"
             )
 
         segment_idx = 0

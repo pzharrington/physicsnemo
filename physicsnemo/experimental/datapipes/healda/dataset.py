@@ -33,7 +33,6 @@ Example usage::
     obs_loader = UFSUnifiedLoader(
         data_path="/path/to/obs",
         sensors=["atms", "mhs", "conv"],
-        normalization="zscore",
         obs_context_hours=(-21, 3),
     )
     transform = ERA5ObsTransform(variable_config=VARIABLE_CONFIGS["era5"])

@@ -27,9 +27,10 @@ import torch.utils.data
 class RestartableDistributedSampler(torch.utils.data.Sampler):
     """A stateful distributed sampler that automatically loops over the dataset.
 
-    Each epoch generates a rank-specific random permutation.  The sampler
-    tracks its position within the permutation so that ``restart()`` can
-    resume from an exact checkpoint.
+    Each epoch generates a shared random permutation across ranks, then
+    partitions it by stride so every sample is visited exactly once per epoch.
+    The sampler tracks its position within the permutation so that
+    ``restart()`` can resume from an exact checkpoint.
 
     Args:
         dataset: Map-style dataset (used only for ``len``).
@@ -64,7 +65,7 @@ class RestartableDistributedSampler(torch.utils.data.Sampler):
     def set_epoch(self, epoch):
         self.epoch = epoch
         self.iteration = 0
-        rng = torch.Generator().manual_seed(self.seed + self.epoch + self.rank)
+        rng = torch.Generator().manual_seed(self.seed + self.epoch)
         permutation = torch.randperm(self.len, generator=rng)
 
         rem = self.len % self.num_replicas

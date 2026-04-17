@@ -82,7 +82,7 @@ def test_reproducible():
 
 
 def test_multi_replica_independent():
-    """Different ranks get independent permutations of the same length."""
+    """Different ranks receive disjoint slices of the shared permutation."""
     dataset = list(range(100))
     s0 = RestartableDistributedSampler(dataset, rank=0, num_replicas=2, seed=42)
     s1 = RestartableDistributedSampler(dataset, rank=1, num_replicas=2, seed=42)
@@ -97,8 +97,10 @@ def test_multi_replica_independent():
     # Each rank gets a valid subset of indices
     assert all(0 <= i < 100 for i in idx0)
     assert all(0 <= i < 100 for i in idx1)
-    # Rank-dependent seed produces different orderings
+    # Ranks visit different indices (stride-partitioned shared permutation)
     assert idx0 != idx1
+    # Together they cover every sample exactly once
+    assert sorted(idx0 + idx1) == list(range(100))
 
 
 def test_len_drops_remainder():
