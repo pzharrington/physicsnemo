@@ -223,7 +223,22 @@ def _redistribute_optim_sd_for_dtensor(
     return {**optim_sd, "state": new_state}
 
 
+def _fsdp_uses_flat_param_optim(model: torch.nn.Module | None) -> bool:
+    """Return True if *model* is FSDP-wrapped with ``use_orig_params=False``.
+
+    That is the only configuration in which optimizer state goes through
+    the FlatParameter flatten/unflatten path (and therefore the only
+    configuration affected by the channels_last asymmetry). With
+    ``use_orig_params=True`` FSDP exposes per-original-param optimizer
+    state and the round-trip is layout-preserving on its own.
+    """
+    if not isinstance(model, FSDP):
+        return False
+    return not getattr(model, "_use_orig_params", True)
+
+
 def _remap_channels_last_optim_sd(
+    opt_model: torch.nn.Module | None,
     optim_sd: dict[str, Any],
 ) -> dict[str, Any]:
     """Compensate for an FSDP optim-state flatten/unflatten asymmetry.
@@ -246,15 +261,23 @@ def _remap_channels_last_optim_sd(
     Other entries (and ranks that received an empty ``optim_sd`` for the
     broadcast-from-rank-0 path) pass through unchanged.
 
+    Only fires when *opt_model* is FSDP-wrapped with
+    ``use_orig_params=False`` -- with ``use_orig_params=True`` the
+    asymmetry doesn't exist and the remap would *cause* the corruption it
+    is meant to prevent.
+
     Note: we cannot inspect the live model to find channels_last params --
     with ``use_orig_params=False`` the original parameters are hidden
     behind plain tensor attributes and ``named_parameters()`` only sees
-    the 1-D ``FlatParameter``.
+    the 1-D ``FlatParameter``. So detection is on the saved tensors
+    instead.
 
     See ``torch/distributed/fsdp/_optim_utils.py::_flatten_tensor_optim_state``
     and ``_flat_param.py::flatten_tensors``.
     """
     if "state" not in optim_sd:
+        return optim_sd
+    if not _fsdp_uses_flat_param_optim(opt_model):
         return optim_sd
 
     def _maybe_remap(t: torch.Tensor) -> torch.Tensor:
@@ -1123,14 +1146,14 @@ def _load_checkpoint_distributed(
                 osd_list: list[Any] = [optim_sd]
                 torch.distributed.broadcast_object_list(osd_list, src=0)
                 optim_sd = _redistribute_optim_sd_for_dtensor(dtensor_plc, osd_list[0])
-                optim_sd = _remap_channels_last_optim_sd(optim_sd)
+                optim_sd = _remap_channels_last_optim_sd(opt_model, optim_sd)
                 set_optimizer_state_dict(
                     opt_model, optimizer, optim_sd, options=full_options
                 )
             else:
                 # Remap on rank 0 only -- DCP broadcasts the rank-0 dict to
                 # the others as part of broadcast_from_rank0.
-                optim_sd = _remap_channels_last_optim_sd(optim_sd)
+                optim_sd = _remap_channels_last_optim_sd(opt_model, optim_sd)
                 set_optimizer_state_dict(
                     opt_model, optimizer, optim_sd, options=broadcast_options
                 )

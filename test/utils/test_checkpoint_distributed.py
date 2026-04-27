@@ -478,7 +478,7 @@ def test_load_model_weights_fsdp_shard_tensor(
     if dm.rank == 0:
         for key in ref_params:
             assert torch.allclose(
-                ref_params[key].cpu(), loaded_params[key].cpu(), rtol=1e-4, atol=1e-4
+                ref_params[key].cpu(), loaded_params[key].cpu(), rtol=1e-5, atol=1e-5
             ), f"Parameter {key} differs after load_model_weights"
 
     # Verify pos_embed is still sharded
@@ -826,6 +826,7 @@ def test_fsdp_grad_scaler_checkpoint(shared_tmp_dir, sync_module_states):
 
 @pytest.mark.timeout(30)
 @pytest.mark.multigpu_static
+@pytest.mark.parametrize("use_orig_params", [False, True])
 @pytest.mark.parametrize(
     "memory_format",
     [
@@ -833,20 +834,25 @@ def test_fsdp_grad_scaler_checkpoint(shared_tmp_dir, sync_module_states):
         pytest.param(torch.contiguous_format, id="contiguous"),
     ],
 )
-def test_fsdp_channels_last_optim_roundtrip(shared_tmp_dir, memory_format):
+def test_fsdp_channels_last_optim_roundtrip(
+    shared_tmp_dir, memory_format, use_orig_params
+):
     """Optimizer state for channels_last Conv2d weights survives a checkpoint round-trip.
 
-    PyTorch FSDP with ``use_orig_params=False`` packs the FlatParameter
+    With ``use_orig_params=False`` PyTorch FSDP packs the FlatParameter
     using ``as_strided((numel,), (1,))`` for non-truly-contiguous params
     (storage byte order) but unpacks loaded optimizer state with
     ``torch.flatten`` (logical NCHW order).  For channels_last Conv2d
     weights those orders differ, which silently corrupts ``exp_avg`` /
     ``exp_avg_sq`` after a save-load cycle.  ``checkpoint.py`` works
-    around the asymmetry via ``_remap_channels_last_optim_sd``; this
-    test pins that behaviour.
+    around the asymmetry via ``_remap_channels_last_optim_sd``.
 
-    The ``contiguous`` parametrization is a control: the same code path
-    must keep working when no remap is needed.
+    Parametrized to also pin the negative cases:
+
+    * ``contiguous_format``: same code path with no remap needed.
+    * ``use_orig_params=True``: optim state goes per-original-param,
+      not via the FlatParameter, so the asymmetry doesn't exist and the
+      remap must *not* fire (firing would itself scramble the state).
     """
     torch.manual_seed(0)
     dm = DistributedManager()
@@ -866,7 +872,7 @@ def test_fsdp_channels_last_optim_roundtrip(shared_tmp_dir, memory_format):
             m,
             device_mesh=mesh["world"],
             sharding_strategy=ShardingStrategy.NO_SHARD,
-            use_orig_params=False,
+            use_orig_params=use_orig_params,
             sync_module_states=True,
         )
 
