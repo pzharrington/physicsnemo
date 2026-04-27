@@ -247,7 +247,7 @@ def test_checkpoint_integrity(
     cfg_diffusion: DictConfig,
     *,
     force_sharding: bool,
-    net_architecture: Literal["unet", "dit"] = "dit"
+    net_architecture: Literal["unet", "dit"] = "dit",
 ):
     """Test that model and optimizer states are intact and sharded correctly after checkpoint save/load."""
 
@@ -259,7 +259,9 @@ def test_checkpoint_integrity(
 
     if dist.world_size == 4:
         if force_sharding:
-            pytest.skip("Skipping: force_sharding is redundant with domain_parallel_size = 2")
+            pytest.skip(
+                "Skipping: force_sharding is redundant with domain_parallel_size = 2"
+            )
         cfg_diffusion.training.domain_parallel_size = 2
         cfg_diffusion.training.batch_size = 2
     else:

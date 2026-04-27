@@ -881,9 +881,7 @@ def test_fsdp_channels_last_optim_roundtrip(shared_tmp_dir, memory_format):
         optimizer.zero_grad()
 
     full_options = StateDictOptions(full_state_dict=True)
-    ref_optim_sd = get_optimizer_state_dict(
-        fsdp_model, optimizer, options=full_options
-    )
+    ref_optim_sd = get_optimizer_state_dict(fsdp_model, optimizer, options=full_options)
 
     save_checkpoint(
         shared_tmp_dir,
