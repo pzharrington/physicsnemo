@@ -31,6 +31,7 @@ from physicsnemo.core.version_check import OptionalImport
 
 xarray = OptionalImport("xarray")
 
+from physicsnemo.experimental.datapipes.healda.configs.sensors import STATS_DIR_ENV
 from physicsnemo.experimental.datapipes.healda.loaders.zarr_loader import NO_LEVEL, ZarrLoader
 from physicsnemo.experimental.datapipes.healda.types import BatchInfo, TimeUnit, VariableConfig
 
@@ -180,7 +181,13 @@ def _load_raw_stats(config: VariableConfig) -> pd.DataFrame:
         file_name = "era5_13_levels_stats.csv"
     else:
         raise ValueError(f"Unknown dataset: {config.name}")
-    path = pathlib.Path(__file__).parent.parent / "configs" / file_name
+    stats_dir = os.environ.get(STATS_DIR_ENV)
+    if not stats_dir:
+        raise RuntimeError(
+            f"{STATS_DIR_ENV} is not set; point it at a directory containing "
+            f"{file_name} (see examples/weather/healda/configs)."
+        )
+    path = pathlib.Path(stats_dir) / file_name
     return pd.read_csv(path).set_index(["variable", "level"])
 
 

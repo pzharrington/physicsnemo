@@ -280,16 +280,6 @@ perf = [
     "transformer_engine[pytorch]",
 ]
 
-healda = [
-    "nvidia-physicsnemo[datapipes-extras]",
-    "pyarrow>=14.0.0",
-    "triton>=3.0.0",
-    "fsspec>=2023.5.0",
-    # earth2grid is required at runtime but temporarily excluded from the
-    # install group due to previous torch version pinning and --no-build-isolation
-    # conflicts with other pacakges; install it manually for now.
-]
-
 
 #####################################################################
 # Linting configuration

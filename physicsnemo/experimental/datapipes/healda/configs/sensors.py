@@ -19,11 +19,18 @@ Defines sensor configurations, platform mappings, and channel offsets used
 by ``UFSUnifiedLoader`` and the observation transform pipeline.
 """
 
+import os
 import pathlib
 from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
+
+# Recipe-side directory containing per-sensor `*_normalizations.csv` files
+# (and the ERA5 stats CSV consumed by `loaders.era5`). When unset, sensor
+# stats fall back to zero-mean / unit-std so the package remains usable
+# without recipe-specific data.
+STATS_DIR_ENV = "HEALDA_STATS_DIR"
 
 
 @dataclass
@@ -42,10 +49,14 @@ class SensorConfig:
     raw_to_local: np.ndarray = field(init=False)
 
     def __post_init__(self):
-        base = pathlib.Path(__file__).parent / "normalizations"
-        norm_file = base / f"{self.name}_normalizations.csv"
+        stats_dir = os.environ.get(STATS_DIR_ENV)
+        norm_file = (
+            pathlib.Path(stats_dir) / "normalizations" / f"{self.name}_normalizations.csv"
+            if stats_dir
+            else None
+        )
 
-        if norm_file.exists():
+        if norm_file is not None and norm_file.exists():
             df = pd.read_csv(norm_file)
             channel_col = "Raw_Channel_ID"
             df = df[df["Platform_ID"] == -1].sort_values(channel_col)

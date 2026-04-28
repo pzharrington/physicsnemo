@@ -19,6 +19,23 @@ to the protocols outlined in the
 [Generalized Data Loading](#generalized-data-loading) section
 below.
 
+### Normalization statistics
+
+Per-sensor observation stats (`configs/normalizations/*.csv`)
+and the ERA5 stats table (`configs/era5_13_levels_stats.csv`)
+ship with this recipe rather than the installed package, since
+they are training-set specific. Point the datapipe at them by
+setting `HEALDA_STATS_DIR` before importing
+`physicsnemo.experimental.datapipes.healda`:
+
+```bash
+export HEALDA_STATS_DIR=$(pwd)/configs
+```
+
+If unset, sensor configs fall back to zero-mean / unit-std
+(useful for tests and structural checks); the ERA5 stats
+loader will raise instead, since there is no sensible default.
+
 ## Generalized Data Loading
 
 The `physicsnemo.experimental.datapipes.healda` package provides
