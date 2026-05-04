@@ -410,9 +410,7 @@ def test_cross_mode_channels_last_model_load(shared_tmp_dir):
     )
     if dm.rank == 0:
         for name, expected in saved_params.items():
-            assert name in full_loaded_model, (
-                f"Loaded model state missing '{name}'"
-            )
+            assert name in full_loaded_model, f"Loaded model state missing '{name}'"
             actual = full_loaded_model[name].detach().contiguous().cpu()
             assert torch.equal(actual, expected), (
                 f"Logical model values for '{name}' differ between save and "
