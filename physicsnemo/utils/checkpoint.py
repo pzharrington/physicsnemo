@@ -265,17 +265,41 @@ def _fsdp_uses_flat_param_optim(model: torch.nn.Module | None) -> bool:
     return not getattr(model, "_use_orig_params", True)
 
 
+def _strides_match_channels_last(
+    shape: tuple[int, ...] | torch.Size,
+    stride: tuple[int, ...],
+) -> bool:
+    """True iff *stride* matches the canonical NHWC / NDHWC stride formula.
+
+    For 4-D ``(N, C, H, W)`` the channels_last layout has strides
+    ``(C*H*W, 1, W*C, C)``; for 5-D ``(N, C, D, H, W)`` channels_last_3d
+    has strides ``(D*H*W*C, 1, H*W*C, W*C, C)``. Anything else -- including
+    standard-contig tensors that happen to satisfy ``stride[1] == 1`` because
+    of trailing-1 dims -- returns False.
+    """
+    if len(shape) != len(stride):
+        return False
+    if len(shape) == 4:
+        n, c, h, w = shape
+        return tuple(stride) == (c * h * w, 1, w * c, c)
+    if len(shape) == 5:
+        n, c, d, h, w = shape
+        return tuple(stride) == (d * h * w * c, 1, h * w * c, w * c, c)
+    return False
+
+
 def _get_cl_param_fqns(opt_model: torch.nn.Module | None) -> set[str]:
     """Return FQNs of FSDP-managed original params recorded as channels_last.
 
     For every FSDP submodule in *opt_model*, reads ``flat_param._fqns`` /
     ``_shapes`` / ``_strides`` / ``_contiguities`` and returns the set of
     original-parameter FQNs whose ``_contiguities[i] is False`` and whose
-    recorded strides match ``channels_last`` (4-D) or ``channels_last_3d``
-    (5-D). That is the same bit ``_get_unflat_views`` consults to decide
-    ``view`` vs ``as_strided`` on save -- so ``_contiguities[i] is False``
-    is exactly the signal that the destination ``FlatParameter`` slot
-    expects NHWC storage order at load time.
+    recorded strides match the canonical ``channels_last`` (4-D) or
+    ``channels_last_3d`` (5-D) formula. That is the same bit
+    ``_get_unflat_views`` consults to decide ``view`` vs ``as_strided`` on
+    save -- so ``_contiguities[i] is False`` plus a CL stride pattern is
+    exactly the signal that the destination ``FlatParameter`` slot expects
+    NHWC storage order at load time.
 
     Returns an empty set when *opt_model* isn't FSDP+``use_orig_params=False``
     (the only configuration where the flatten/unflatten asymmetry exists).
@@ -318,9 +342,7 @@ def _get_cl_param_fqns(opt_model: torch.nn.Module | None) -> set[str]:
         ):
             if contig:
                 continue
-            # CL / CL3D both have channel stride == 1 (channel is the
-            # innermost / fastest-varying dim in NHWC / NDHWC storage).
-            if len(shape) in (4, 5) and len(stride) == len(shape) and stride[1] == 1:
+            if _strides_match_channels_last(shape, stride):
                 cl_fqns.add((prefix + fqn).removeprefix("_orig_mod."))
     return cl_fqns
 
