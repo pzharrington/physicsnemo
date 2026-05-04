@@ -113,6 +113,34 @@ def _cpu_offload_state_dict(state_dict: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _force_standard_contiguous(state_dict: dict[str, Any]) -> dict[str, Any]:
+    """Make positive-dim, non-DTensor tensors standard-contiguous.
+
+    Compensates for a layout-blind broadcast inside DCP's
+    ``set_model_state_dict`` / ``set_optimizer_state_dict``: the rank-0→others
+    transfer goes through ``dist.broadcast``, which is happy to send a
+    ``channels_last`` tensor (its contiguity check passes for that format) but
+    moves bytes in *storage* order. Receivers on non-zero ranks allocate via
+    ``torch.empty(shape, dtype, device)`` (standard NCHW), so CL bytes land
+    in NCHW positions and values are silently permuted on receive.
+
+    Forcing standard contiguity on rank 0 makes the broadcast layout-consistent.
+    ``.contiguous()`` is a no-op for tensors that are already standard-contig,
+    a value-preserving (logical) copy for ``channels_last`` /
+    ``channels_last_3d``, and is intentionally skipped for ``DTensor`` (whose
+    contiguity semantics differ).
+    """
+    out: dict[str, Any] = {}
+    for k, v in state_dict.items():
+        if isinstance(v, torch.Tensor) and not isinstance(v, DTensor) and v.dim() > 0:
+            out[k] = v.contiguous()
+        elif isinstance(v, dict):
+            out[k] = _force_standard_contiguous(v)
+        else:
+            out[k] = v
+    return out
+
+
 def _get_dtensor_param_placements(
     model: torch.nn.Module,
 ) -> dict[str, tuple[Any, tuple[Any, ...]]]:
@@ -1101,8 +1129,13 @@ def _load_checkpoint_distributed(
                 set_model_state_dict(model, sd, options=full_options)
             else:
                 # FSDP-managed DTensors (FULL_SHARD/SHARD_GRAD_OP) or no
-                # DTensors at all — broadcast_from_rank0 handles both.
+                # DTensors at all — broadcast_from_rank0 handles both. Force
+                # standard contiguity on rank 0 first so the per-tensor
+                # broadcast inside DCP doesn't permute channels_last params on
+                # receive (see ``_force_standard_contiguous`` for the why).
                 sd = model_state_dicts.get(name, {}) if is_rank0 else {}
+                if is_rank0:
+                    sd = _force_standard_contiguous(sd)
                 set_model_state_dict(model, sd, options=broadcast_options)
         else:
             # A mix of distributed and non-distributed models is valid
