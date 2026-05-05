@@ -328,8 +328,12 @@ def test_checkpoint_integrity(
     (params1, opt_params1) = get_state_dict(net1, opt1, options=options)
     (params2, opt_params2) = get_state_dict(net2, opt2, options=options)
 
-    assert set(params1.keys()) == set(params2.keys())
-    assert set(opt_params1.keys()) == set(opt_params2.keys())
+    assert set(params1.keys()) == set(params2.keys()), (
+        "Model state dicts before and after checkpointing have different keys"
+    )
+    assert set(opt_params1.keys()) == set(opt_params2.keys()), (
+        "Optimizer state dicts before and after checkpointing have different keys"
+    )
 
     for key, param1 in params1.items():
         param2 = params2[key]
