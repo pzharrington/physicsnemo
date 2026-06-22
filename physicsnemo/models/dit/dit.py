@@ -18,7 +18,6 @@ import warnings
 from dataclasses import dataclass
 from typing import Any, Dict, Literal, Optional, Tuple, Union
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -110,7 +109,7 @@ class DiT(Module):
     force_tokenization_fp32 : bool, optional, default=False
         If ``True``, forces tokenization and de-tokenization to run in fp32.
     use_nan_mask_tokens : bool, optional, default=False
-        If ``True``, every NATTEN block overwrites invalid spatial tokens with a per-block learned ``mask_token`` immediately before the QKV projection, so the neighborhood window mixes in a single learned feature instead of corrupted (e.g. NaN-padded) signal. Requires a NATTEN attention backend (``"natten2d"`` or ``"natten2d_rope"``). The static invalid pattern is supplied after construction via :meth:`set_nan_pixel_mask`; until then all tokens are treated as valid and behavior is identical to ``use_nan_mask_tokens=False``.
+        If ``True``, every NATTEN block overwrites invalid spatial tokens with a per-block learned ``mask_token`` immediately before the QKV projection, so the neighborhood window mixes in a single learned feature instead of corrupted (e.g. NaN-padded) signal. Requires a NATTEN attention backend (``"natten2d"`` or ``"natten2d_rope"``). This only allocates the learned ``mask_token`` parameters; the invalid pattern itself is supplied dynamically per forward call via the ``invalid_mask`` argument (see :meth:`forward`). When no ``invalid_mask`` is passed, all tokens are treated as valid and behavior is identical to ``use_nan_mask_tokens=False``.
 
     Forward
     -------
@@ -126,6 +125,8 @@ class DiT(Module):
         Additional keyword arguments passed to the attention module's forward method.
     tokenizer_kwargs : Dict[str, Any], optional
         Additional keyword arguments passed to the tokenizer's forward method.
+    invalid_mask : Optional[torch.Tensor], optional
+        Per-sample boolean (or float) invalid-region mask of shape :math:`(N, *\text{spatial\_dims})` or :math:`(N, 1, *\text{spatial\_dims})`, ``True`` (or ``1``) at invalid pixels (e.g. NaN-padded / outside sensor coverage). It is max-pooled to patch (token) granularity and the flagged tokens are replaced by each NATTEN block's learned ``mask_token`` before attention. The pattern may differ per sample (dynamic, batch-variable masking) and per forward call. Requires ``use_nan_mask_tokens=True``. Because the splice does not sanitize non-finite values, invalid pixels in ``x`` must be finite (e.g. pass ``x`` through :func:`torch.nan_to_num` first). Under domain parallelism, pass ``invalid_mask`` as a ``ShardTensor`` sharded along height exactly like ``x``.
 
     Outputs
     -------
@@ -404,21 +405,6 @@ class DiT(Module):
         if dit_initialization:
             self.initialize_weights()
 
-        # Static patch-level invalid mask used by the NaN-mask-token blocks. A
-        # single copy is kept on the model (not per-block) and passed to every
-        # block in forward. Registered as persistent=False so it is not saved in
-        # checkpoints by default (it is sensor/domain geometry, re-installed via
-        # set_nan_pixel_mask); set_nan_pixel_mask can opt into persistence.
-        # Initialized to all-valid (False) so behavior matches the unmasked path
-        # until a real mask is installed. Built at the global latent size so
-        # distribute_module can shard it if domain parallelism is used.
-        if use_nan_mask_tokens:
-            self.register_buffer(
-                "invalid_token_mask",
-                torch.zeros(self._latent_h, self._latent_w, dtype=torch.bool),
-                persistent=False,
-            )
-
         self.force_tokenization_fp32 = force_tokenization_fp32
         self.register_load_state_dict_pre_hook(self._migrate_legacy_checkpoint)
 
@@ -511,79 +497,60 @@ class DiT(Module):
         for block in self.blocks:
             block.initialize_weights()
 
-    @torch.no_grad()
-    def set_nan_pixel_mask(
+    def _pixel_mask_to_token_mask(
         self,
-        pixel_mask: Float[torch.Tensor, "height width"],
-        persistent: bool = False,
-    ) -> None:
-        r"""Install the static invalid-token mask for the NaN-mask-token blocks.
+        invalid_mask: torch.Tensor,
+    ) -> Float[torch.Tensor, "batch sequence"]:
+        r"""Reduce a per-sample pixel-level invalid mask to token granularity.
 
-        Converts a pixel-level ``(H, W)`` boolean mask to a patch-level
-        ``(h_lat, w_lat)`` mask: a patch is marked invalid if *any* pixel within
-        its ``patch_size`` block is invalid. The result replaces the
-        ``invalid_token_mask`` buffer.
+        Aggregates an invalid-pixel mask of shape :math:`(B, H, W)` or
+        :math:`(B, 1, H, W)` to a flattened patch-level mask of shape
+        :math:`(B, L)` with ``L = h_lat * w_lat``: a patch (token) is marked
+        invalid if *any* pixel in its ``patch_size`` block is invalid. The
+        flattening order (row-major over ``(h_lat, w_lat)``) matches the
+        tokenizer's ``flatten(2)`` token ordering, so the returned mask aligns
+        positionally with the token sequence consumed by the NATTEN blocks.
 
-        This must be called **before** the model is wrapped for domain
-        parallelism (e.g. ``distribute_module``), so that the buffer can be
-        sharded along height; once the buffer is a DTensor it can no longer be
-        replaced via ``register_buffer``.
+        Implemented with :func:`torch.nn.functional.max_pool2d`, which is
+        registered for ``ShardTensor``: with ``kernel_size == stride ==
+        patch_size`` the pooling is non-overlapping and stays local under
+        height-sharded domain parallelism, mirroring how the tokenizer's
+        strided convolution produces the sharded token sequence.
 
         Parameters
         ----------
-        pixel_mask : torch.Tensor
-            Boolean tensor of shape :math:`(H, W)`, ``True`` where the input
-            pixel is invalid (e.g. NaN-padded / outside sensor coverage). The
-            pattern is treated as static across samples.
-        persistent : bool, optional, default=False
-            Whether the resulting patch-level mask is saved in the model's
-            ``state_dict``. The default (``False``) resets the mask to all-valid
-            on checkpoint load, so a stale mask from a different domain cannot be
-            used accidentally; the trainer reinstalls it via this method. Set
-            ``True`` to keep the mask in the checkpoint as an audit trail.
+        invalid_mask : torch.Tensor
+            Boolean/float mask, ``True`` (or ``>0``) at invalid pixels.
+
+        Returns
+        -------
+        torch.Tensor
+            Boolean token mask of shape :math:`(B, L)`.
         """
-        if not self._use_nan_mask_tokens:
-            raise RuntimeError(
-                "set_nan_pixel_mask called on a DiT constructed with "
-                "use_nan_mask_tokens=False"
-            )
-        if isinstance(pixel_mask, np.ndarray):
-            pixel_mask = torch.from_numpy(pixel_mask)
-        pixel_mask = pixel_mask.to(dtype=torch.bool)
-        if pixel_mask.ndim != 2:
+        if invalid_mask.ndim == len(self.input_size) + 1:
+            # (B, *spatial) -> (B, 1, *spatial)
+            invalid_mask = invalid_mask.unsqueeze(1)
+        if (
+            invalid_mask.ndim != len(self.input_size) + 2
+            or invalid_mask.shape[1] != 1
+        ):
             raise ValueError(
-                f"pixel_mask must be (H, W); got shape {tuple(pixel_mask.shape)}"
-            )
-        if tuple(pixel_mask.shape) != tuple(self.input_size):
-            raise ValueError(
-                f"pixel_mask shape {tuple(pixel_mask.shape)} does not match the "
-                f"DiT input resolution {tuple(self.input_size)}"
+                "invalid_mask must have shape (B, *spatial_dims) or "
+                "(B, 1, *spatial_dims) matching the DiT spatial input; got "
+                f"shape {tuple(invalid_mask.shape)}"
             )
 
-        # Keep the new buffer on the same device as the existing one.
-        target_device = self.invalid_token_mask.device
-        pix = pixel_mask.to(target_device)
-
-        # Aggregate to patch granularity: any invalid pixel -> invalid patch.
-        patch_mask = (
-            F.max_pool2d(
-                pix.float().unsqueeze(0).unsqueeze(0),
-                kernel_size=self.patch_size,
-                stride=self.patch_size,
-            )
-            .squeeze(0)
-            .squeeze(0)
-            > 0
-        )
-        if tuple(patch_mask.shape) != (self._latent_h, self._latent_w):
-            raise ValueError(
-                f"derived patch mask shape {tuple(patch_mask.shape)} != "
-                f"({self._latent_h}, {self._latent_w})"
-            )
-
-        self.register_buffer(
-            "invalid_token_mask", patch_mask.to(torch.bool), persistent=persistent
-        )
+        # Any invalid pixel within a patch -> invalid token. Pool in float so
+        # the op is well-defined; threshold back to bool afterwards.
+        patch_mask = F.max_pool2d(
+            invalid_mask.to(torch.float32),
+            kernel_size=self.patch_size,
+            stride=self.patch_size,
+        )  # (B, 1, h_lat, w_lat)
+        # (B, 1, h_lat, w_lat) -> (B, L). Row-major flatten matches the
+        # tokenizer; under ShardTensor this merges the height shard with the
+        # (replicated) width axis, exactly as the static-buffer path did.
+        return (patch_mask > 0).reshape(patch_mask.shape[0], -1)
 
     def forward(
         self,
@@ -593,7 +560,18 @@ class DiT(Module):
         p_dropout: Optional[float | Float[torch.Tensor, " batch"]] = None,
         attn_kwargs: Dict[str, Any] = {},
         tokenizer_kwargs: Dict[str, Any] = {},
+        invalid_mask: Optional[
+            Float[torch.Tensor, "batch *spatial_dims"]
+        ] = None,
     ) -> Float[torch.Tensor, "batch out_channels *spatial_dims"]:
+        if invalid_mask is not None and not self._use_nan_mask_tokens:
+            raise ValueError(
+                "invalid_mask was provided but the DiT was constructed with "
+                "use_nan_mask_tokens=False, so no learned mask tokens were "
+                "allocated. Rebuild the model with use_nan_mask_tokens=True to "
+                "use dynamic invalid-region masking."
+            )
+
         # Tokenize: (B, C, H, W) -> (B, L, D)
         if self.force_tokenization_fp32:
             dtype = x.dtype
@@ -608,11 +586,13 @@ class DiT(Module):
         c = self.conditioning_embedder(t, condition=condition)  # (B, D)
 
         block_attn_kwargs = {**self.attn_kwargs_forward, **attn_kwargs}
-        if self._use_nan_mask_tokens:
-            # (h_lat, w_lat) -> (L,); after Shard(0) this is the rank-local
-            # (h_local * w_lat,) flattened mask, aligned with the local tokens.
+        if invalid_mask is not None:
+            # Reduce the (B, *spatial) pixel mask to a (B, L) token mask aligned
+            # with the token sequence. Under domain parallelism invalid_mask is a
+            # ShardTensor sharded along height like x, so the pooled token mask
+            # is sharded along the sequence axis exactly like the tokens.
             block_attn_kwargs.setdefault(
-                "invalid_token_mask", self.invalid_token_mask.reshape(-1)
+                "invalid_token_mask", self._pixel_mask_to_token_mask(invalid_mask)
             )
 
         for block in self.blocks:

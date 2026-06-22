@@ -23,7 +23,10 @@ from physicsnemo.nn.module.dit_layers import (
     Natten2DSelfAttention,
     ProjReshape2DDetokenizer,
 )
-from physicsnemo.nn.module.rope import build_axial_rope_cos_sin, rotate_half_pairs
+from physicsnemo.nn.module.rope import (
+    apply_rotary_pos_emb,
+    build_axial_rope_cos_sin_2d,
+)
 from test import common
 from test.conftest import requires_module
 
@@ -151,6 +154,17 @@ def test_ditblock_natten_rope_and_mask_token_forward(device, pytestconfig):
     )
     assert not torch.allclose(y_none, y_masked, atol=1e-5)
 
+    # A per-sample (B, T) mask applies a distinct pattern to each sample: mask
+    # sample 0 only and the result must match the shared (T,) mask on sample 0
+    # while sample 1 is left unmasked (equals the no-mask output).
+    per_sample = torch.zeros(B, T, dtype=torch.bool, device=device)
+    per_sample[0] = invalid
+    y_per_sample = block(
+        x, c, attn_kwargs={"latent_hw": (H, W), "invalid_token_mask": per_sample}
+    )
+    assert torch.allclose(y_per_sample[0], y_masked[0], atol=1e-5)
+    assert torch.allclose(y_per_sample[1], y_none[1], atol=1e-5)
+
 
 @torch.no_grad()
 @requires_module(["transformer_engine"])
@@ -268,9 +282,9 @@ def test_ditblock_intermediate_dropout_scalar_and_per_sample(device):
 
 
 @torch.no_grad()
-def test_build_axial_rope_cos_sin_shape_and_validation():
+def test_build_axial_rope_cos_sin_2d_shape_and_validation():
     h, w, head_dim = 5, 7, 16
-    cos, sin = build_axial_rope_cos_sin(h, w, head_dim, theta=10000.0)
+    cos, sin = build_axial_rope_cos_sin_2d(h, w, head_dim, theta=10000.0)
     assert cos.shape == (h, w, head_dim)
     assert sin.shape == (h, w, head_dim)
     assert cos.dtype == torch.float32 and sin.dtype == torch.float32
@@ -279,7 +293,7 @@ def test_build_axial_rope_cos_sin_shape_and_validation():
     assert torch.allclose(sin[..., 0::2], sin[..., 1::2])
     # head_dim must be divisible by 4.
     with pytest.raises(ValueError):
-        build_axial_rope_cos_sin(h, w, head_dim=6)
+        build_axial_rope_cos_sin_2d(h, w, head_dim=6)
 
 
 @torch.no_grad()
@@ -288,10 +302,10 @@ def test_rope_rotation_matches_complex_rotation_and_preserves_norm():
     (real-valued rotation matrix / complex multiply) and preserve pair norms."""
     torch.manual_seed(0)
     h, w, head_dim = 4, 6, 16
-    cos, sin = build_axial_rope_cos_sin(h, w, head_dim, theta=10000.0)
+    cos, sin = build_axial_rope_cos_sin_2d(h, w, head_dim, theta=10000.0)
     q = torch.randn(2, 3, h, w, head_dim)  # (B, heads, h, w, head_dim)
 
-    q_rot = q * cos + rotate_half_pairs(q) * sin
+    q_rot = apply_rotary_pos_emb(q, cos, sin)
 
     # Canonical rotation on each adjacent (even, odd) pair:
     #   even' = even*cos - odd*sin ;  odd' = even*sin + odd*cos

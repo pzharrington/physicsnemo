@@ -411,11 +411,12 @@ def shard_dim_selector(param_name: str) -> int | None:
     sharded_dim1 = ["pos_embed", "pos_embd", "spatial_emb"]
     if any(name in param_name for name in sharded_dim1):
         return 1
-    # Spatial buffers laid out with height first: (h_lat, w_lat) for the DiT
-    # invalid-token mask, (h_lat, w_lat, head_dim) for the RoPE cos/sin tables.
-    # Sharding dim 0 (height) gives each rank globally-correct rows with no
-    # explicit rank offset needed in model code.
-    sharded_dim0 = ["invalid_token_mask", "rope_cos", "rope_sin"]
+    # Spatial buffers laid out with height first: (h_lat, w_lat, head_dim) for
+    # the DiT RoPE cos/sin tables. Sharding dim 0 (height) gives each rank
+    # globally-correct rows with no explicit rank offset needed in model code.
+    # (The DiT invalid-region mask is no longer a model buffer: it is supplied
+    # dynamically per forward call as a ShardTensor sharded along height like x.)
+    sharded_dim0 = ["rope_cos", "rope_sin"]
     if any(name in param_name for name in sharded_dim0):
         return 0
     return None

@@ -79,8 +79,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adds rotary position embedding (RoPE) modules to `phyiscsnemo.nn` and
   integrates support for 2D RoPE in the neighborhood attention backend
   of `DiT` layers.
-- Adds support for RoPE, invalid token masking, and a new `ConvDetokenizer`
-  in `phyiscsnemo.models.DiT`
+- Adds support for RoPE, dynamic invalid-region masking, and a new
+  `ConvDetokenizer` in `phyiscsnemo.models.DiT`. Invalid regions are supplied
+  per forward call via the `invalid_mask` argument of `DiT.forward` (a
+  per-sample, batch-variable pixel mask, domain-parallel safe), replacing
+  flagged tokens with a learned mask token.
 
 ### Changed
 

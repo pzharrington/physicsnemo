@@ -17,13 +17,13 @@
 import pytest
 import torch
 
+from physicsnemo.core import Module
 from physicsnemo.nn.module.rope import (
     RotaryPositionEmbedding1D,
     RotaryPositionEmbedding2D,
     apply_rotary_pos_emb,
-    build_axial_rope_cos_sin,
+    build_axial_rope_cos_sin_2d,
     build_rope_cos_sin_1d,
-    rotate_half_pairs,
 )
 
 
@@ -58,7 +58,7 @@ def test_rotary_module_matches_flattened_tables():
     rope = RotaryPositionEmbedding2D(head_dim=head_dim, latent_hw=(h, w))
     q = torch.randn(3, 4, h * w, head_dim)
 
-    cos, sin = build_axial_rope_cos_sin(h, w, head_dim)
+    cos, sin = build_axial_rope_cos_sin_2d(h, w, head_dim)
     cos_flat = cos.reshape(-1, head_dim)
     sin_flat = sin.reshape(-1, head_dim)
     expected = apply_rotary_pos_emb(q, cos_flat, sin_flat)
@@ -76,7 +76,7 @@ def test_rotary_module_layout_matches_spatial_rotation():
     head_dim, h, w = 16, 3, 5
     B, heads = 2, 4
 
-    cos, sin = build_axial_rope_cos_sin(h, w, head_dim)  # (h, w, head_dim)
+    cos, sin = build_axial_rope_cos_sin_2d(h, w, head_dim)  # (h, w, head_dim)
     q_spatial = torch.randn(B, heads, h, w, head_dim)
     spatial_rot = apply_rotary_pos_emb(
         q_spatial, cos.unsqueeze(0).unsqueeze(0), sin.unsqueeze(0).unsqueeze(0)
@@ -105,7 +105,7 @@ def test_rotary_module_rebuild_for_new_shape():
 def test_apply_rotary_pos_emb_preserves_dtype_and_norm():
     torch.manual_seed(0)
     head_dim, n = 16, 12
-    cos, sin = build_axial_rope_cos_sin(3, 4, head_dim)
+    cos, sin = build_axial_rope_cos_sin_2d(3, 4, head_dim)
     cos_flat, sin_flat = cos.reshape(-1, head_dim), sin.reshape(-1, head_dim)
 
     x = torch.randn(2, n, head_dim, dtype=torch.float32)
@@ -117,8 +117,13 @@ def test_apply_rotary_pos_emb_preserves_dtype_and_norm():
     pair_out = x_rot[..., 0::2].square() + x_rot[..., 1::2].square()
     assert torch.allclose(pair_in, pair_out, atol=1e-5)
 
-    # Sanity: rotate_half_pairs applied twice negates (rotation by 90 deg twice).
-    assert torch.allclose(rotate_half_pairs(rotate_half_pairs(x)), -x, atol=1e-6)
+    # Sanity: a uniform 90-degree rotation (cos=0, sin=1) is the rotate-half
+    # operation; applying it twice negates x (rotation by 90 deg twice).
+    zeros = torch.zeros_like(x)
+    ones = torch.ones_like(x)
+    once = apply_rotary_pos_emb(x, zeros, ones)
+    twice = apply_rotary_pos_emb(once, zeros, ones)
+    assert torch.allclose(twice, -x, atol=1e-6)
 
 
 # --- 1D RoPE ---
@@ -200,3 +205,57 @@ def test_rotary_1d_relative_phase_is_translation_invariant():
     # Offset of 3 gives the same score regardless of absolute position.
     assert torch.allclose(dot(5, 2), dot(20, 17), atol=1e-4)
     assert torch.allclose(dot(10, 4), dot(30, 24), atol=1e-4)
+
+
+# --- physicsnemo.Module checkpoint round-trips ---
+#
+# Both RoPE modules subclass physicsnemo.core.Module, so they must support the
+# .save() / Module.from_checkpoint() recipe. Their cos/sin tables are
+# persistent=False buffers, deterministically rebuilt from the __init__ args, so
+# a round-trip must reproduce the forward exactly without the tables appearing in
+# the checkpoint.
+
+
+@torch.no_grad()
+def test_rotary_2d_module_checkpoint_round_trip(tmp_path):
+    head_dim, h, w = 16, 4, 5
+    rope = RotaryPositionEmbedding2D(
+        head_dim=head_dim, latent_hw=(h, w), theta=5000.0
+    )
+    assert isinstance(rope, Module)
+    # persistent=False: tables are not serialized.
+    assert "cos" not in rope.state_dict() and "sin" not in rope.state_dict()
+
+    q = torch.randn(2, 3, h * w, head_dim)
+    k = torch.randn(2, 3, h * w, head_dim)
+    q_ref, k_ref = rope(q, k)
+
+    path = str(tmp_path / "rope2d.mdlus")
+    rope.save(path)
+    loaded = Module.from_checkpoint(path)
+    # Tables were rebuilt at the right shape from the saved __init__ args.
+    assert loaded.cos.shape == (h * w, head_dim)
+    assert loaded.theta == 5000.0
+    q_out, k_out = loaded(q, k)
+    assert torch.equal(q_out, q_ref) and torch.equal(k_out, k_ref)
+
+
+@torch.no_grad()
+def test_rotary_1d_module_checkpoint_round_trip(tmp_path):
+    head_dim, max_seq_len = 16, 32
+    rope = RotaryPositionEmbedding1D(
+        head_dim=head_dim, max_seq_len=max_seq_len, theta=5000.0
+    )
+    assert isinstance(rope, Module)
+    assert "cos" not in rope.state_dict() and "sin" not in rope.state_dict()
+
+    q = torch.randn(2, 4, 20, head_dim)
+    k = torch.randn(2, 4, 20, head_dim)
+    q_ref, k_ref = rope(q, k)
+
+    path = str(tmp_path / "rope1d.mdlus")
+    rope.save(path)
+    loaded = Module.from_checkpoint(path)
+    assert loaded.cos.shape == (max_seq_len, head_dim)
+    q_out, k_out = loaded(q, k)
+    assert torch.equal(q_out, q_ref) and torch.equal(k_out, k_ref)

@@ -110,9 +110,8 @@ from .rope import (
     RotaryPositionEmbedding1D,
     RotaryPositionEmbedding2D,
     apply_rotary_pos_emb,
-    build_axial_rope_cos_sin,
+    build_axial_rope_cos_sin_2d,
     build_rope_cos_sin_1d,
-    rotate_half_pairs,
 )
 from .siren_layers import SirenLayer, SirenLayerType
 from .spectral_layers import (

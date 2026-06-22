@@ -34,7 +34,10 @@ from physicsnemo.nn.module.hpx.tokenizer import (
     HEALPixPatchTokenizer,
 )
 from physicsnemo.nn.module.mlp_layers import Mlp
-from physicsnemo.nn.module.rope import apply_rotary_pos_emb, build_axial_rope_cos_sin
+from physicsnemo.nn.module.rope import (
+    apply_rotary_pos_emb,
+    build_axial_rope_cos_sin_2d,
+)
 from physicsnemo.nn.module.utils import PatchEmbed2D
 
 timm_v1_0_16 = check_version_spec("timm", "1.0.16", hard_fail=False)
@@ -392,7 +395,7 @@ class Natten2DSelfAttention(AttentionModuleBase):
     latent_hw : Tuple[int, int]
         The height and width of the 2D latent space for reshaping. Sequence length must equal ``latent_hw[0] * latent_hw[1]``.
     invalid_token_mask : torch.Tensor, optional
-        Boolean (or float) mask of shape :math:`(L,)`, ``True`` (or ``1``) at spatial token positions to overwrite with the learned ``mask_token`` before QKV. Ignored when ``use_mask_token=False`` or when ``None``.
+        Boolean (or float) mask of shape :math:`(L,)` (shared across the batch) or :math:`(B, L)` (per-sample), ``True`` (or ``1``) at spatial token positions to overwrite with the learned ``mask_token`` before QKV. The per-sample form supports dynamic, batch-dimension-variable masking. Ignored when ``use_mask_token=False`` or when ``None``. Invalid positions in ``x`` must be finite (sanitize NaNs beforehand); see :meth:`_apply_mask_token`.
 
     Returns
     -------
@@ -459,7 +462,12 @@ class Natten2DSelfAttention(AttentionModuleBase):
     def _apply_mask_token(
         self,
         x: Float[torch.Tensor, "batch sequence hidden_size"],
-        invalid_token_mask: Optional[Float[torch.Tensor, " sequence"]],
+        invalid_token_mask: Optional[
+            Union[
+                Float[torch.Tensor, " sequence"],
+                Float[torch.Tensor, "batch sequence"],
+            ]
+        ],
     ) -> Float[torch.Tensor, "batch sequence hidden_size"]:
         r"""Replace invalid spatial tokens with the learned ``mask_token``.
 
@@ -471,22 +479,43 @@ class Natten2DSelfAttention(AttentionModuleBase):
         a replicated DTensor and ``x``/``invalid_token_mask`` are sharded
         tensors, the arithmetic stays entirely within DTensor dispatch and never
         triggers a mixed plain-tensor / DTensor op.
+
+        .. note::
+
+            Because the splice multiplies ``x`` by ``(1 - alpha)``, an invalid
+            token whose value is non-finite (e.g. ``NaN``) is **not** sanitized
+            (``NaN * 0 == NaN``). Callers that flag NaN-padded regions must
+            therefore replace those values (e.g. via :func:`torch.nan_to_num`)
+            *before* the forward pass, so ``x`` is finite at the masked
+            positions.
+
+        The mask may be shared across the batch (shape :math:`(L,)`) or
+        per-sample (shape :math:`(B, L)`); the latter enables dynamic,
+        batch-dimension-variable masking.
         """
         if self.mask_token is None or invalid_token_mask is None:
             return x
-        alpha = invalid_token_mask.to(dtype=x.dtype).view(1, -1, 1)
+        alpha = invalid_token_mask.to(dtype=x.dtype)
+        # (L,) -> (1, L, 1) broadcasts across the batch; (B, L) -> (B, L, 1)
+        # applies a distinct pattern per sample.
+        alpha = alpha.view(1, -1, 1) if alpha.ndim == 1 else alpha.unsqueeze(-1)
         return x * (1.0 - alpha) + self.mask_token.to(x.dtype) * alpha
 
     def forward(
         self,
         x: Float[torch.Tensor, "batch sequence hidden_size"],
         latent_hw: Tuple[int, int],
-        invalid_token_mask: Optional[Float[torch.Tensor, " sequence"]] = None,
+        invalid_token_mask: Optional[
+            Union[
+                Float[torch.Tensor, " sequence"],
+                Float[torch.Tensor, "batch sequence"],
+            ]
+        ] = None,
     ) -> Float[torch.Tensor, "batch sequence hidden_size"]:
         B, N, C = x.shape
         h, w = latent_hw
 
-        if N != h * w:
+        if not torch.compiler.is_compiling() and N != h * w:
             raise ValueError(
                 f"Sequence length must be {h * w} based on latent_hw={latent_hw}, but got {N}"
             )
@@ -576,7 +605,7 @@ class RopeNatten2DSelfAttention(Natten2DSelfAttention):
         self.rope_theta = float(rope_theta)
         self._latent_hw: Tuple[int, int] = (int(latent_hw[0]), int(latent_hw[1]))
 
-        cos, sin = build_axial_rope_cos_sin(
+        cos, sin = build_axial_rope_cos_sin_2d(
             *self._latent_hw, self.head_dim, theta=self.rope_theta
         )
         # persistent=False: not in state_dict (rebuilt deterministically at
@@ -593,7 +622,7 @@ class RopeNatten2DSelfAttention(Natten2DSelfAttention):
         """
         target_dtype = self.rope_cos.dtype
         target_device = self.rope_cos.device
-        cos, sin = build_axial_rope_cos_sin(
+        cos, sin = build_axial_rope_cos_sin_2d(
             h, w, self.head_dim, theta=self.rope_theta, device=target_device
         )
         self.register_buffer("rope_cos", cos.to(dtype=target_dtype), persistent=False)
@@ -604,11 +633,16 @@ class RopeNatten2DSelfAttention(Natten2DSelfAttention):
         self,
         x: Float[torch.Tensor, "batch sequence hidden_size"],
         latent_hw: Tuple[int, int],
-        invalid_token_mask: Optional[Float[torch.Tensor, " sequence"]] = None,
+        invalid_token_mask: Optional[
+            Union[
+                Float[torch.Tensor, " sequence"],
+                Float[torch.Tensor, "batch sequence"],
+            ]
+        ] = None,
     ) -> Float[torch.Tensor, "batch sequence hidden_size"]:
         B, N, C = x.shape
         h, w = int(latent_hw[0]), int(latent_hw[1])
-        if N != h * w:
+        if not torch.compiler.is_compiling() and N != h * w:
             raise ValueError(
                 f"Sequence length must be {h * w} based on latent_hw={latent_hw}, but got {N}"
             )
@@ -1284,21 +1318,27 @@ class ProjReshape2DDetokenizer(DetokenizerModuleBase):
 
 
 class ConvDetokenizer(DetokenizerModuleBase):
-    r"""``proj_reshape_2d`` detokenizer extended with a zero-initialized residual conv smoothing head.
+    r"""Detokenizer with a residual convolutional smoothing head to suppress patch-seam artifacts.
 
-    The stock :class:`ProjReshape2DDetokenizer` maps each token independently to a
-    ``patch x patch`` output block and therefore cannot couple across patch seams, which
-    produces checkerboard artifacts — most visible on spiky output channels such as
-    precipitation. This module wraps it and adds a small residual convolutional head
-    over the full ``(B, C_{out}, H, W)`` image so that information can flow across
-    patch boundaries.
+    Wraps :class:`ProjReshape2DDetokenizer` and adds a small
+    residual convolutional head over the full :math:`(B, C_{out}, H, W)` output
+    image.  The base detokenizer maps each token independently to its
+    ``patch × patch`` output block, so it cannot couple information across patch
+    boundaries; this can produce checkerboard artifacts on output channels with
+    high spatial frequency content.  The conv head lets information flow across
+    patch seams and can smooth those artifacts away.
 
-    The final conv layer is zero-initialized, so at construction the residual output is
-    exactly zero and the module is numerically identical to :class:`ProjReshape2DDetokenizer`.
-    This means it can be swapped in for an existing ``proj_reshape_2d`` run without
-    perturbing training dynamics. The head is fully convolutional, so the
-    re-instantiate-at-target-resolution + ``load_state_dict`` recipe for variable
-    inference grids continues to work.
+    The final conv layer is zero-initialized, so at construction the residual
+    contribution is exactly zero and this module is numerically identical to
+    :class:`ProjReshape2DDetokenizer`.
+
+    Use this as a drop-in replacement for
+    :class:`ProjReshape2DDetokenizer` (or ``detokenizer="proj_reshape_2d_conv"``
+    in :func:`get_detokenizer`) when checkerboard artifacts are visible in the
+    predicted image.  Because the head starts at zero, it can be swapped in
+    for a run already trained with ``proj_reshape_2d`` without disturbing
+    training dynamics.  The head is fully convolutional, so it can support
+    variable-resolution inference.
 
     Parameters
     ----------

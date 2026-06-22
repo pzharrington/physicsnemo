@@ -22,12 +22,14 @@ height (``Shard(0)``) of its spatial buffers via ``distribute_module`` on the
 domain mesh and then ``fully_shard`` (FSDP2) on the ddp mesh, with the spatial
 input sharded along H on the domain mesh.
 
-The key property under test is the "shard-the-buffer" design: building the RoPE
-cos/sin tables and the invalid-token mask at the global spatial size and
-sharding them along height gives each rank globally-correct rows with no
-explicit ``h_offset`` arithmetic, so the distributed forward is numerically
-equivalent to a single-GPU forward on the full input (NATTEN halo exchange
-handles the window boundaries).
+The key property under test is the "shard-along-height" design: building the
+RoPE cos/sin tables at the global spatial size and sharding them along height
+gives each rank globally-correct rows with no explicit ``h_offset`` arithmetic,
+so the distributed forward is numerically equivalent to a single-GPU forward on
+the full input (NATTEN halo exchange handles the window boundaries). The
+invalid-region mask is supplied dynamically to ``forward`` as a height-sharded
+``ShardTensor`` (like the spatial input) and pooled to token granularity inside
+the model, so it lines up with the sequence-sharded tokens with no buffer.
 
 Run with, e.g.::
 
@@ -45,7 +47,7 @@ from torch.distributed.tensor.placement_types import Replicate, Shard
 from physicsnemo.distributed import DistributedManager
 from physicsnemo.domain_parallel import scatter_tensor
 from physicsnemo.models.dit import DiT
-from physicsnemo.nn.module.rope import build_axial_rope_cos_sin
+from physicsnemo.nn.module.rope import build_axial_rope_cos_sin_2d
 from test.conftest import requires_module
 
 # Latent grid is 4x4; with a domain mesh of size 2 each rank owns 2 rows.
@@ -62,7 +64,7 @@ def _shard_dim_for(name: str) -> int | None:
     """Mirror of StormCast's ``shard_dim_selector`` for the buffers under test."""
     if any(s in name for s in ("pos_embed", "pos_embd", "spatial_emb")):
         return 1
-    if any(s in name for s in ("invalid_token_mask", "rope_cos", "rope_sin")):
+    if any(s in name for s in ("rope_cos", "rope_sin")):
         return 0
     return None
 
@@ -115,11 +117,16 @@ def _build_dit(device, attention_backend: str, use_nan_mask_tokens: bool) -> DiT
     return model.to(device).eval()
 
 
-def _make_pixel_mask(device) -> torch.Tensor:
-    """A static invalid region: the whole top-left patch + one interior pixel."""
-    pixel_mask = torch.zeros(*INPUT_SIZE, dtype=torch.bool, device=device)
-    pixel_mask[0:PATCH_SIZE, 0:PATCH_SIZE] = True  # -> patch (0, 0)
-    pixel_mask[9, 9] = True  # -> patch (2, 2)
+def _make_pixel_mask(B, device) -> torch.Tensor:
+    """A per-sample invalid pixel mask of shape ``(B, 1, H, W)``.
+
+    The invalid region (whole top-left patch + one interior pixel) is shared
+    across the batch here purely for a simple reference; the forward path treats
+    it as a fully dynamic, potentially per-sample mask.
+    """
+    pixel_mask = torch.zeros(B, 1, *INPUT_SIZE, dtype=torch.bool, device=device)
+    pixel_mask[:, :, 0:PATCH_SIZE, 0:PATCH_SIZE] = True  # -> patch (0, 0)
+    pixel_mask[:, :, 9, 9] = True  # -> patch (2, 2)
     return pixel_mask
 
 
@@ -169,8 +176,9 @@ def _run_dit_distributed_check(
     t = torch.rand(B, device=device)
 
     model = _build_dit(device, attention_backend, use_nan_mask_tokens)
+    # Per-sample invalid mask, supplied dynamically to forward (no model buffer).
+    pixel_mask_full = _make_pixel_mask(B, device) if use_nan_mask_tokens else None
     if use_nan_mask_tokens:
-        model.set_nan_pixel_mask(_make_pixel_mask(device))
         # Give the learned mask tokens a non-trivial value so masking actually
         # changes the result (init is zero); seeded for cross-rank consistency.
         torch.manual_seed(7)
@@ -180,7 +188,7 @@ def _run_dit_distributed_check(
 
     # --- single-GPU reference on the full input (before distribution) ---
     with torch.no_grad():
-        ref_out = model(x_full, t).detach().clone()
+        ref_out = model(x_full, t, invalid_mask=pixel_mask_full).detach().clone()
 
     # --- distribute exactly as the StormCast recipe does ---
     model = distribute_module(
@@ -205,16 +213,25 @@ def _run_dit_distributed_check(
     x_sharded = scatter_tensor(
         x_full, domain_src, domain_mesh, (Shard(2),), requires_grad=False
     )
+    # The invalid mask is a forward input, sharded along height exactly like x,
+    # so the pooled token mask lines up with the sequence-sharded tokens.
+    mask_sharded = (
+        scatter_tensor(
+            pixel_mask_full, domain_src, domain_mesh, (Shard(2),), requires_grad=False
+        )
+        if use_nan_mask_tokens
+        else None
+    )
     # Scalars/conditions must be replicated DTensors on the domain mesh so they
     # compose with the now-DTensor model buffers (e.g. the timestep embedder's
     # `freqs`); this mirrors StormCast's ParallelHelper.replicate_tensor.
     t_dt = distribute_tensor(t, domain_mesh, [Replicate()])
     with torch.no_grad():
-        out = model(x_sharded, t_dt)
+        out = model(x_sharded, t_dt, invalid_mask=mask_sharded)
     gathered = out.full_tensor()  # collective: gather H-shards over domain mesh
 
-    # Reassemble the sharded RoPE table and invalid mask globally (collectives),
-    # so correctness of the per-rank row bands can be checked symmetrically.
+    # Reassemble the sharded RoPE table globally (collectives), so correctness of
+    # the per-rank row bands can be checked symmetrically.
     rope_cos_global = None
     rope_cos_local_shape = None
     for m in model.modules():
@@ -222,9 +239,6 @@ def _run_dit_distributed_check(
             rope_cos_local_shape = tuple(m.rope_cos.to_local().shape)
             rope_cos_global = m.rope_cos.full_tensor()
             break
-    mask_global = (
-        model.invalid_token_mask.full_tensor() if use_nan_mask_tokens else None
-    )
 
     # ------------------------------------------------------------------
     # Assertions (no further collectives): these evaluate identically on every
@@ -240,7 +254,8 @@ def _run_dit_distributed_check(
     assert any(p.is_shard() for p in out._spec.placements)
 
     # Distributed forward must match the single-GPU reference: this is the
-    # end-to-end proof that the sharded RoPE rows and mask are globally correct.
+    # end-to-end proof that the sharded RoPE rows and the dynamically-supplied,
+    # height-sharded invalid mask are globally correct.
     torch.testing.assert_close(gathered, ref_out, atol=1e-4, rtol=1e-4)
 
     # For the RoPE backend, the table is sharded (each rank owns h_local rows)
@@ -248,22 +263,9 @@ def _run_dit_distributed_check(
     if attention_backend == "natten2d_rope":
         assert rope_cos_global is not None, "no RoPE attention module found"
         assert rope_cos_local_shape == (h_local, latent_w, head_dim)
-        full_cos, _ = build_axial_rope_cos_sin(latent_h, latent_w, head_dim)
+        full_cos, _ = build_axial_rope_cos_sin_2d(latent_h, latent_w, head_dim)
         torch.testing.assert_close(
             rope_cos_global, full_cos.to(device), atol=1e-5, rtol=1e-5
         )
     else:
         assert rope_cos_global is None
-
-    if use_nan_mask_tokens:
-        full_pixel = _make_pixel_mask(device)
-        full_patch = (
-            torch.nn.functional.max_pool2d(
-                full_pixel.float().unsqueeze(0).unsqueeze(0),
-                kernel_size=PATCH_SIZE,
-                stride=PATCH_SIZE,
-            ).squeeze()
-            > 0
-        )
-        assert mask_global.shape == (latent_h, latent_w)
-        assert torch.equal(mask_global, full_patch)
