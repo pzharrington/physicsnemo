@@ -290,7 +290,9 @@ def test_dit_dynamic_invalid_mask_forward(device):
     with torch.no_grad():
         out_none = model(x, t)
         out_valid = model(
-            x, t, invalid_mask=torch.zeros(2, 1, 16, 16, dtype=torch.bool, device=device)
+            x,
+            t,
+            invalid_mask=torch.zeros(2, 1, 16, 16, dtype=torch.bool, device=device),
         )
         # Mask the top-left patch of sample 0 only.
         invalid = torch.zeros(2, 1, 16, 16, dtype=torch.bool, device=device)

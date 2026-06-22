@@ -219,9 +219,7 @@ def test_rotary_1d_relative_phase_is_translation_invariant():
 @torch.no_grad()
 def test_rotary_2d_module_checkpoint_round_trip(tmp_path):
     head_dim, h, w = 16, 4, 5
-    rope = RotaryPositionEmbedding2D(
-        head_dim=head_dim, latent_hw=(h, w), theta=5000.0
-    )
+    rope = RotaryPositionEmbedding2D(head_dim=head_dim, latent_hw=(h, w), theta=5000.0)
     assert isinstance(rope, Module)
     # persistent=False: tables are not serialized.
     assert "cos" not in rope.state_dict() and "sin" not in rope.state_dict()

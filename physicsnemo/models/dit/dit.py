@@ -530,10 +530,7 @@ class DiT(Module):
         if invalid_mask.ndim == len(self.input_size) + 1:
             # (B, *spatial) -> (B, 1, *spatial)
             invalid_mask = invalid_mask.unsqueeze(1)
-        if (
-            invalid_mask.ndim != len(self.input_size) + 2
-            or invalid_mask.shape[1] != 1
-        ):
+        if invalid_mask.ndim != len(self.input_size) + 2 or invalid_mask.shape[1] != 1:
             raise ValueError(
                 "invalid_mask must have shape (B, *spatial_dims) or "
                 "(B, 1, *spatial_dims) matching the DiT spatial input; got "
@@ -560,9 +557,7 @@ class DiT(Module):
         p_dropout: Optional[float | Float[torch.Tensor, " batch"]] = None,
         attn_kwargs: Dict[str, Any] = {},
         tokenizer_kwargs: Dict[str, Any] = {},
-        invalid_mask: Optional[
-            Float[torch.Tensor, "batch *spatial_dims"]
-        ] = None,
+        invalid_mask: Optional[Float[torch.Tensor, " batch *spatial_dims"]] = None,
     ) -> Float[torch.Tensor, "batch out_channels *spatial_dims"]:
         if invalid_mask is not None and not self._use_nan_mask_tokens:
             raise ValueError(

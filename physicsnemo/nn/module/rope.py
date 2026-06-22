@@ -404,9 +404,7 @@ class RotaryPositionEmbedding2D(Module):
             self._rebuild_for_shape(int(latent_hw[0]), int(latent_hw[1]))
 
         n = self.cos.shape[0]
-        if not torch.compiler.is_compiling() and (
-            q.shape[-2] != n or k.shape[-2] != n
-        ):
+        if not torch.compiler.is_compiling() and (q.shape[-2] != n or k.shape[-2] != n):
             raise ValueError(
                 f"q/k sequence length must be h*w={n} (latent_hw={self._latent_hw}), "
                 f"but got q={q.shape[-2]}, k={k.shape[-2]}"
