@@ -84,9 +84,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per forward call via the `invalid_mask` argument of `DiT.forward` (a
   per-sample, batch-variable pixel mask, domain-parallel safe), replacing
   flagged tokens with a learned mask token.
+- Adds an inference script (`src/infer.py` + `conf/infer.yaml`) to the
+  Unified External Aero Recipe
+  (`examples/cfd/external_aerodynamics/unified_external_aero_recipe`),
+  with integrated aerodynamic force/moment coefficients (`src/forces.py`:
+  CD/CL/CS/CMR/CMP/CMY). The script is model/dataset-agnostic, writes one
+  native `.pdmsh` `DomainMesh` per sample (carrying physical-unit
+  `pred_<field>` / `true_<field>`), reports training-space metrics
+  (matching the training/validation loop), and reuses the trainer's
+  dataloader / collate / metric tooling (refactored into `datasets.py`
+  and `utils.py`).
 
 ### Changed
 
+- xDeepONet `SpatialBranch`
+  (`physicsnemo.experimental.models.xdeeponet.SpatialBranch`) now supports
+  mixed-precision (AMP/autocast) training: FFT-based spectral convolutions are
+  evaluated in float32 internally (cuFFT lacks complex-half support) while the
+  rest of the branch uses autocast. This is a no-op under full precision, so
+  fp32 outputs are unchanged. Also fixes a stale module docstring that
+  referenced removed trunk/MLP-branch builder helpers.
+- `physicsnemo.mesh.remesh` now raises `NotImplementedError` for non-2D-in-3D
+  inputs (the pyacvd ACVD clustering is surface-only) instead of failing
+  confusingly downstream, and its docstring reflects that restriction.
+- `physicsnemo.mesh.spatial`: `BVH.from_mesh` and `ClusterTree.from_points` now
+  share a single morton-LBVH node-topology builder (`spatial/_lbvh.py`),
+  removing ~80 lines of duplicated build logic; construction output is
+  byte-identical. `BVH.from_mesh` now defaults to `leaf_size=1` (was 8),
+  matching `ClusterTree.from_points` and measured to be more performant across
+  platforms (smaller leaves yield fewer candidate cells per query). Containment /
+  nearest-cell query results are unchanged. Adds the first direct unit tests for
+  `ClusterTree` (construction invariants, aggregates, dual-tree cover).
 - `physicsnemo.mesh` performance: eliminated host-device syncs on hot paths.
   Cached topological adjacencies now store the `Adjacency` object directly instead
   of reconstructing it (which re-ran its syncing `__post_init__` validation) on every
@@ -101,6 +129,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `physicsnemo.mesh`: `validate_mesh(check_self_intersection=True)` now raises
   `NotImplementedError` (the check is unimplemented) instead of silently returning a
   `None` sentinel that masquerades as "no self-intersections found".
+- Performance improvements in the diffusion module: reduced peak memory of
+  DPS-guided diffusion sampling most notably for multi-diffusion at large
+  domains. A guided `sample()` loop run under `torch.no_grad()` now detaches the
+  state between solver steps, so the guidance autograd graph is no longer
+  accumulated across the sampling trajectory (sampled outputs are unchanged;
+  use `torch.no_grad()`, not `torch.inference_mode()`). Also expands CI test
+  coverage and adds an API documentation page for
+  `physicsnemo.diffusion.multi_diffusion`.
 
 ### Deprecated
 
@@ -108,6 +144,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `physicsnemo.mesh.remesh` now preserves the input mesh's device and floating
+  dtype (the pyacvd/pyvista round-trip previously dropped them to CPU/float32).
+- `physicsnemo.mesh`: `Mesh.to(<float dtype>)` and `DomainMesh.to(<float dtype>)`
+  raised `TypeError: cells must have an int-like dtype` because the cast was applied
+  to the integer `cells` tensor. A floating/complex dtype is now applied only to
+  floating tensors; the integer `cells` (and any integer data) are preserved. Device
+  moves are unchanged.
 - `physicsnemo.mesh`: fixed several silent-wrong-result bugs — `slice_cells`
   carried stale point-level and non-local (`gaussian_curvature`) caches onto the
   sliced mesh; the intrinsic LSQ gradient returned all-zeros for codimension >= 2
@@ -162,6 +205,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 ### Dependencies
+
+- Updates the minimum supported `warp-lang` version to 1.14.0.
 
 ## [2.1.0] - 2026-05-26
 
