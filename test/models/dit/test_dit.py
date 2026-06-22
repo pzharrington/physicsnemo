@@ -94,39 +94,69 @@ def test_dit_conv_detokenizer_forward_accuracy(device):
     identical to ``proj_reshape_2d``); we activate the final conv with a fixed
     seed so the smoothing path actually contributes, then compare against a saved
     reference. CPU-friendly: uses the timm attention backend.
+
+    The reference holds a non-trivial fp32 conv output (unlike the all-zero
+    references of the other DiT forward-accuracy tests, whose zero-initialized
+    output projection makes the result device-independent). Two precautions keep
+    the single reference valid on both CPU and CUDA:
+
+    * All weights (including the activated conv head) are initialized while the
+      model is still on CPU, *before* ``.to(device)``. Initializing after the
+      move would draw the conv weights from the CUDA RNG, which produces a
+      different sequence than the CPU RNG for the same seed, so the CUDA run
+      would use different weights than the CPU-generated reference.
+    * TF32 is disabled so the CUDA convolutions compute true fp32 and match the
+      reference within 1e-3 instead of drifting by TF32's ~1e-3 relative error.
     """
-    torch.manual_seed(0)
-    model = DiT(
-        input_size=32,
-        patch_size=4,
-        in_channels=3,
-        hidden_size=128,
-        depth=2,
-        num_heads=4,
-        layernorm_backend="torch",
-        attention_backend="timm",
-        detokenizer="proj_reshape_2d_conv",
-        detokenizer_kwargs={"conv_layers": 2, "conv_hidden": 16, "conv_kernel": 3},
-    ).to(device)
-    model.eval()  # Set to eval to avoid dropout randomness
+    prev_cudnn_tf32 = torch.backends.cudnn.allow_tf32
+    prev_matmul_tf32 = torch.backends.cuda.matmul.allow_tf32
+    torch.backends.cudnn.allow_tf32 = False
+    torch.backends.cuda.matmul.allow_tf32 = False
+    try:
+        torch.manual_seed(0)
+        model = DiT(
+            input_size=32,
+            patch_size=4,
+            in_channels=3,
+            hidden_size=128,
+            depth=2,
+            num_heads=4,
+            layernorm_backend="torch",
+            attention_backend="timm",
+            detokenizer="proj_reshape_2d_conv",
+            detokenizer_kwargs={
+                "conv_layers": 2,
+                "conv_hidden": 16,
+                "conv_kernel": 3,
+            },
+        )  # built on CPU; moved to device below, after all init
 
-    # Activate the zero-initialized residual head so the conv path contributes to
-    # the output (otherwise the residual is exactly zero by construction).
-    with torch.no_grad():
-        convs = [m for m in model.detokenizer.conv_head if isinstance(m, nn.Conv2d)]
-        torch.manual_seed(1)
-        nn.init.normal_(convs[-1].weight, std=0.02)
-        nn.init.normal_(convs[-1].bias, std=0.02)
+        # Activate the zero-initialized residual head so the conv path
+        # contributes to the output (otherwise the residual is exactly zero by
+        # construction). Done on CPU so the RNG draw is device-independent.
+        with torch.no_grad():
+            convs = [
+                m for m in model.detokenizer.conv_head if isinstance(m, nn.Conv2d)
+            ]
+            torch.manual_seed(1)
+            nn.init.normal_(convs[-1].weight, std=0.02)
+            nn.init.normal_(convs[-1].bias, std=0.02)
 
-    x = torch.randn(2, 3, 32, 32).to(device)
-    t = torch.randint(0, 1000, (2,)).to(device)
+        model = model.to(device)
+        model.eval()  # Set to eval to avoid dropout randomness
 
-    assert common.validate_forward_accuracy(
-        model,
-        (x, t, None),
-        file_name="models/dit/data/dit_conv_detokenizer_output.pth",
-        atol=1e-3,
-    )
+        x = torch.randn(2, 3, 32, 32).to(device)
+        t = torch.randint(0, 1000, (2,)).to(device)
+
+        assert common.validate_forward_accuracy(
+            model,
+            (x, t, None),
+            file_name="models/dit/data/dit_conv_detokenizer_output.pth",
+            atol=1e-3,
+        )
+    finally:
+        torch.backends.cudnn.allow_tf32 = prev_cudnn_tf32
+        torch.backends.cuda.matmul.allow_tf32 = prev_matmul_tf32
 
 
 def test_dit_constructor(device):
