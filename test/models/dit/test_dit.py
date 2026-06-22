@@ -135,9 +135,7 @@ def test_dit_conv_detokenizer_forward_accuracy(device):
         # contributes to the output (otherwise the residual is exactly zero by
         # construction). Done on CPU so the RNG draw is device-independent.
         with torch.no_grad():
-            convs = [
-                m for m in model.detokenizer.conv_head if isinstance(m, nn.Conv2d)
-            ]
+            convs = [m for m in model.detokenizer.conv_head if isinstance(m, nn.Conv2d)]
             torch.manual_seed(1)
             nn.init.normal_(convs[-1].weight, std=0.02)
             nn.init.normal_(convs[-1].bias, std=0.02)
