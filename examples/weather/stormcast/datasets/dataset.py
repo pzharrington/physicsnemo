@@ -48,6 +48,7 @@ class StormCastDataset(torch.utils.data.Dataset, ABC):
             invalid-region tokens with learned mask tokens.  The dataset is responsible
             for producing this mask; caching internally is encouraged when the pattern
             is static across samples.
+
         The outputs of __getitem__ should be already normalized (this is not done in the training
         loop for performance reasons).
 
