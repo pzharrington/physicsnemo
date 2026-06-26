@@ -519,6 +519,78 @@ def test_seeding(
     torch.distributed.barrier()
 
 
+@pytest.mark.parametrize(
+    "world_size, domain_parallel_size, batch_size",
+    [(1, 1, 1), (2, 2, 1), (4, 2, 2)],
+    ids=["single", "domain_parallel", "data_domain_parallel"],
+)
+def test_masking(
+    tmp_path: Path,
+    cfg_diffusion: DictConfig,
+    *,
+    world_size: int,
+    domain_parallel_size: int,
+    batch_size: int,
+):
+    """Exercise the DiT masking pathway end-to-end across parallelism schemes.
+
+    Verifies that training and validation run correctly when:
+    - The dataset serves a per-sample ``"mask"`` key (right-half valid).
+    - The DiT is built with ``use_nan_mask_tokens=True``, enabling token-level
+      mask-token substitution inside every NATTEN block.
+    - The loss weight is computed at token granularity (patch-level pooling +
+      nearest-neighbour expansion) rather than at pixel level.
+
+    Three launch configurations are covered (each run targets one and skips the
+    others, matching the world size pytest was launched with):
+
+    - ``single`` (1 GPU): no sharding; pixel tensors are plain ``torch.Tensor``
+      and the mask pooling runs on ordinary tensors.
+    - ``domain_parallel`` (2 GPUs): ``domain_parallel_size=2``, which shards the
+      height dimension and exercises the ShardTensor ``max_pool2d`` /
+      ``interpolate`` path used to pool the mask to token granularity.
+    - ``data_domain_parallel`` (4 GPUs): a (2, 2) mesh combining data
+      parallelism (``batch_size=2``) with domain parallelism
+      (``domain_parallel_size=2``).
+    """
+    dist = DistributedManager()
+    if dist.world_size != world_size:
+        pytest.skip(
+            f"Skipping: this configuration requires {world_size} process(es), "
+            f"current: {dist.world_size}."
+        )
+
+    rundir = _setup_rundir(tmp_path, dist.world_size)
+
+    cfg = cfg_diffusion.copy()
+    cfg.training.rundir = rundir
+    cfg.training.validation_freq = 5
+    cfg.training.domain_parallel_size = domain_parallel_size
+    cfg.training.batch_size = batch_size
+
+    # Enable dataloader mask in the mock dataset
+    cfg.dataset.use_mask = True
+
+    # Enable DiT token-level masking
+    cfg.model.architecture = "dit"
+    cfg.model.hyperparameters.use_nan_mask_tokens = True
+
+    if "regression" in cfg.model.diffusion_conditions:
+        cfg.model.diffusion_conditions.remove("regression")
+
+    train.main(cfg)
+
+    if dist.world_size > 1:
+        torch.distributed.barrier()
+
+    ckpt_path = os.path.join(
+        rundir, "checkpoints_diffusion", "EDMPreconditioner.0.10.mdlus"
+    )
+    assert os.path.isfile(ckpt_path), (
+        "Diffusion checkpoint not found after masked training"
+    )
+
+
 @pytest.mark.parametrize("net_architecture", ["unet", "dit"])
 @pytest.mark.parametrize(
     "model_type", ["hybrid", "nowcasting", "downscaling", "unconditional"]
