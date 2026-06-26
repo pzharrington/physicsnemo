@@ -507,6 +507,11 @@ class Trainer:
             # Token-granularity: pool mask down to patch level, then expand
             # back so every pixel in a masked patch gets weight 0.
             patch_h, patch_w = self._dit_patch_size
+            if patch_h != patch_w:
+                raise NotImplementedError(
+                    "Token-level loss masking requires square DiT patches; got "
+                    f"patch_size={self._dit_patch_size}."
+                )
             patch_invalid = F.max_pool2d(
                 invalid_mask.float(),
                 kernel_size=(patch_h, patch_w),
@@ -518,11 +523,6 @@ class Trainer:
             # scalar scale_factor (it computes halo sizes as
             # scale_factor * halo). A scalar is exact here because patches are
             # square and H/p * p == H (patching requires H, W divisible by p).
-            if patch_h != patch_w:
-                raise NotImplementedError(
-                    "Token-level loss masking requires square DiT patches; got "
-                    f"patch_size={self._dit_patch_size}."
-                )
             weight = 1.0 - F.interpolate(
                 patch_invalid, scale_factor=patch_h, mode="nearest"
             )  # (B, 1, H, W), 0 at any pixel whose patch is invalid
