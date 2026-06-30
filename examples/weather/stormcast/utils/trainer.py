@@ -341,6 +341,8 @@ class Trainer:
         self.scalar_cond_channels = self.dataset_train.scalar_condition_channels()
         self.lead_time_steps = self.dataset_train.lead_time_steps
 
+        self._channel_loss_weight = self._build_channel_loss_weight()
+
         # Dataloaders
         num_workers = self.cfg.training.num_data_workers
         self.train_dataloader = self.parallel_helper.sharded_dataloader(
@@ -377,6 +379,25 @@ class Trainer:
             raise ValueError(
                 "Scalar conditions are only supported for the 'dit' architecture."
             )
+
+    def _build_channel_loss_weight(self) -> torch.Tensor:
+        r"""Build a ``(1, C, 1, 1)`` per-channel loss weight tensor from config.
+
+        Reads ``cfg.training.channel_loss_weights`` (a dict mapping state
+        channel names to float weights) and returns a broadcastable tensor.
+        Channels not listed default to ``1.0``.  Unknown names emit a warning.
+        """
+        cfg_weights = self.cfg.training.channel_loss_weights or {}
+        unknown = set(cfg_weights) - set(self.state_channels)
+        if unknown:
+            self.logger.info(
+                f"channel_loss_weights references unknown state channels (will be ignored): {sorted(unknown)}"
+            )
+        weights = [cfg_weights.get(ch, 1.0) for ch in self.state_channels]
+        t = torch.tensor(weights, dtype=torch.float32, device=self.device).view(
+            1, -1, 1, 1
+        )
+        return self.parallel_helper.replicate_tensor(t)
 
     # =========================================================================
     # Model Setup
@@ -459,9 +480,12 @@ class Trainer:
         The ``weight`` is derived at the appropriate granularity:
 
         * **DiT + ``use_nan_mask_tokens``**: token-granularity weight — any
-          pixel in a patch where *any* pixel is invalid gets weight 0, matching
-          the token-level substitution done inside the model.  Uses the
-          ``patch_size`` extracted directly from the DiT at construction.
+          pixel in a patch where *any* channel or pixel is invalid gets weight
+          0, matching the token-level substitution done inside the model.
+          Per-channel invalidity from the dataset mask is also applied, so a
+          pixel gets weight 0 if either its token is spatially invalid *or* its
+          specific channel is marked invalid.  Uses the ``patch_size`` extracted
+          directly from the DiT at construction.
         * **Otherwise**: pixel-level weight — ``1 - invalid_mask.float()``.
         * **No mask at all**: scalar ``1.0`` replicated onto the correct device
           mesh (same as the unconditional behaviour).
@@ -470,6 +494,10 @@ class Trainer:
         *also* injected into the DiT as the ``invalid_mask`` forward kwarg (so
         the model can replace invalid tokens with the learned mask token); the
         loss weight is applied regardless.
+
+        The returned ``invalid_mask`` (used for the DiT forward) is always
+        ``(B, 1, H, W)``: it is the spatial union (any-channel) of the
+        dataset mask, since token replacement operates across all channels.
 
         Under domain parallelism the inputs are height-sharded
         ``ShardTensor``s.  :func:`torch.nn.functional.max_pool2d` and
@@ -482,9 +510,9 @@ class Trainer:
             Diffusion target of shape :math:`(B, C, H, W)`; used only for its
             spatial shape and device/dtype.
         batch_mask : torch.Tensor or None
-            Per-sample mask from the dataloader, shape :math:`(B, 1, H, W)`.
-            ``1`` = valid pixel, ``0`` = invalid pixel.  ``None`` when the
-            dataset does not provide a mask.
+            Per-sample mask from the dataloader, broadcastable to
+            :math:`(B, C, H, W)`.  ``1`` = valid pixel, ``0`` = invalid pixel.
+            ``None`` when the dataset does not provide a mask.
 
         Returns
         -------
@@ -501,7 +529,12 @@ class Trainer:
             return None, weight
 
         # batch_mask convention: 1=valid, 0=invalid → invert to invalid-first.
-        invalid_mask = batch_mask < 0.5  # (B, 1, H, W) bool
+        invalid_mask = batch_mask < 0.5  # (B, C_or_1, H_or_1, W_or_1) bool
+
+        # The DiT token-replacement path needs a purely spatial (B, 1, H, W)
+        # mask.  Collapse the channel dimension: a spatial location is invalid
+        # if it is invalid in *any* channel.
+        spatial_invalid = invalid_mask.any(dim=1, keepdim=True)  # (B, 1, H, W)
 
         if self._dit_patch_size is not None and self.use_nan_mask_tokens:
             # Token-granularity: pool mask down to patch level, then expand
@@ -513,7 +546,7 @@ class Trainer:
                     f"patch_size={self._dit_patch_size}."
                 )
             patch_invalid = F.max_pool2d(
-                invalid_mask.float(),
+                spatial_invalid.float(),
                 kernel_size=(patch_h, patch_w),
                 stride=(patch_h, patch_w),
             )  # (B, 1, H/p, W/p)
@@ -523,13 +556,15 @@ class Trainer:
             # scalar scale_factor (it computes halo sizes as
             # scale_factor * halo). A scalar is exact here because patches are
             # square and H/p * p == H (patching requires H, W divisible by p).
-            weight = 1.0 - F.interpolate(
+            token_valid = 1.0 - F.interpolate(
                 patch_invalid, scale_factor=patch_h, mode="nearest"
             )  # (B, 1, H, W), 0 at any pixel whose patch is invalid
+            # Also zero-out pixels invalid per the per-channel dataset mask.
+            weight = token_valid * (1.0 - invalid_mask.float())
         else:
-            weight = 1.0 - invalid_mask.float()  # (B, 1, H, W)
+            weight = 1.0 - invalid_mask.float()  # (B, C_or_1, H_or_1, W_or_1)
 
-        return invalid_mask, weight
+        return spatial_invalid, weight
 
     def _load_regression_net(self) -> Module | None:
         r"""
@@ -764,6 +799,7 @@ class Trainer:
                 # (token-granularity for DiT, pixel-level otherwise) and an
                 # invalid_mask for the DiT forward.
                 invalid_mask, weight = self._build_masks(target, mask)
+                weight = weight * self._channel_loss_weight
 
                 loss_kwargs = {}
                 if lead_time_label is not None:
@@ -902,6 +938,7 @@ class Trainer:
                     )
 
                     invalid_mask, weight = self._build_masks(target, mask)
+                    weight = weight * self._channel_loss_weight
 
                     loss_kwargs = {}
                     if lead_time_label is not None:
@@ -985,7 +1022,7 @@ class Trainer:
                 device=state[1].device,
                 sampler_args=self.cfg.sampler.args.__dict__,
                 lead_time_label=lead_time_label,
-                invalid_mask=invalid_mask,
+                invalid_mask=invalid_mask if self.use_nan_mask_tokens else None,
             )
             if "regression" in self.condition_list:
                 outputs += reg_out
