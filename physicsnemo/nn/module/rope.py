@@ -370,7 +370,10 @@ class RotaryEmbedding2DTables(Module):
     def forward(
         self,
         latent_hw: Optional[Tuple[int, int]] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[
+        Float[torch.Tensor, "h w head_dim"],
+        Float[torch.Tensor, "h w head_dim"],
+    ]:
         if latent_hw is not None:
             self.maybe_rebuild(int(latent_hw[0]), int(latent_hw[1]))
         return self.rope_cos, self.rope_sin
@@ -455,7 +458,10 @@ class RotaryEmbedding1DTables(Module):
     def forward(
         self,
         seq_len: Optional[int] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[
+        Float[torch.Tensor, "seq head_dim"],
+        Float[torch.Tensor, "seq head_dim"],
+    ]:
         if seq_len is None:
             return self.cos, self.sin
         if not torch.compiler.is_compiling() and seq_len > self.max_seq_len:
