@@ -286,7 +286,7 @@ class DiT(Module):
 
         # Constructor-time attention kwargs (copied so the caller's dict is not
         # mutated). The mask-token backends need to allocate their learned mask
-        # parameter. RoPE tables are NOT built per block: the model owns a single
+        # parameter. RoPE tables are not built per block: the model owns a single
         # RotaryEmbedding2DTables provider (below) and passes its tables into
         # every block's forward, so the tables are built, stored, and — under
         # domain parallelism — sharded exactly once for the whole model.
