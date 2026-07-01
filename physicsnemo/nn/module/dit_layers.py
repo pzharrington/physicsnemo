@@ -587,7 +587,7 @@ class RopeNatten2DSelfAttention(Natten2DSelfAttention):
         :class:`~physicsnemo.nn.module.rope.RotaryEmbedding2DTables` provider.
         Required; a :class:`ValueError` is raised if not supplied.
 
-    Returns
+    Outputs
     -------
     torch.Tensor
         Output tensor of shape :math:`(B, L, D)`.
@@ -627,10 +627,17 @@ class RopeNatten2DSelfAttention(Natten2DSelfAttention):
 
         B, N, C = x.shape
         h, w = int(latent_hw[0]), int(latent_hw[1])
-        if not torch.compiler.is_compiling() and N != h * w:
-            raise ValueError(
-                f"Sequence length must be {h * w} based on latent_hw={latent_hw}, but got {N}"
-            )
+        if not torch.compiler.is_compiling():
+            if N != h * w:
+                raise ValueError(
+                    f"Sequence length must be {h * w} based on latent_hw={latent_hw}, but got {N}"
+                )
+            expected = (h, w, self.head_dim)
+            if tuple(rope_cos.shape) != expected or tuple(rope_sin.shape) != expected:
+                raise ValueError(
+                    f"Expected rope_cos/rope_sin of shape {expected}, but got "
+                    f"rope_cos={tuple(rope_cos.shape)}, rope_sin={tuple(rope_sin.shape)}"
+                )
 
         # Overwrite invalid spatial tokens with the learned mask token before QKV.
         x = self._apply_mask_token(x, invalid_token_mask)

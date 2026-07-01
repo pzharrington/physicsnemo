@@ -593,10 +593,11 @@ class DiT(Module):
         block_attn_kwargs = {**self.attn_kwargs_forward, **attn_kwargs}
         if self._is_rope:
             # Fetch the shared RoPE tables once and pass them into every block's
-            # forward. latent_hw comes from block_attn_kwargs (fixed at the
-            # model's latent grid, or overridden by the caller for variable-res
-            # inference), so the provider rebuilds only when the shape changes.
-            rope_cos, rope_sin = self.rope(block_attn_kwargs.get("latent_hw"))
+            # forward. Only forward a latent_hw *override* explicitly supplied by
+            # the caller (variable-resolution inference); the fixed
+            # construction-time grid stays None so the provider returns its
+            # prebuilt tables with no per-call shape comparison on the hot path.
+            rope_cos, rope_sin = self.rope(attn_kwargs.get("latent_hw"))
             block_attn_kwargs["rope_cos"] = rope_cos
             block_attn_kwargs["rope_sin"] = rope_sin
         if invalid_mask is not None:

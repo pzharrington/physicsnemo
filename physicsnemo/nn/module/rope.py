@@ -302,7 +302,7 @@ class RotaryEmbedding2DTables(Module):
         the in-place rebuild replaces the sharded buffers with plain tensors, so
         it is only appropriate for single-device variable-resolution inference.
 
-    Returns
+    Outputs
     -------
     Tuple[torch.Tensor, torch.Tensor]
         ``(rope_cos, rope_sin)``, each of shape :math:`(h, w, head\_dim)`.
@@ -349,7 +349,7 @@ class RotaryEmbedding2DTables(Module):
         self.register_buffer("rope_cos", cos, persistent=False)  # (h, w, head_dim)
         self.register_buffer("rope_sin", sin, persistent=False)  # (h, w, head_dim)
 
-    def maybe_rebuild(self, h: int, w: int) -> None:
+    def _maybe_rebuild(self, h: int, w: int) -> None:
         r"""Rebuild the cos/sin tables for a new latent shape if it changed.
 
         Reached only when :meth:`forward` is called with a ``latent_hw`` that
@@ -375,7 +375,7 @@ class RotaryEmbedding2DTables(Module):
         Float[torch.Tensor, "h w head_dim"],
     ]:
         if latent_hw is not None:
-            self.maybe_rebuild(int(latent_hw[0]), int(latent_hw[1]))
+            self._maybe_rebuild(int(latent_hw[0]), int(latent_hw[1]))
         return self.rope_cos, self.rope_sin
 
 
@@ -415,7 +415,7 @@ class RotaryEmbedding1DTables(Module):
         Number of leading positions to return. If ``None``, the full
         ``max_seq_len`` table is returned.
 
-    Returns
+    Outputs
     -------
     Tuple[torch.Tensor, torch.Tensor]
         ``(cos, sin)``, each of shape :math:`(seq\_len, head\_dim)`.
