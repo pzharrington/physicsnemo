@@ -580,12 +580,12 @@ class RopeNatten2DSelfAttention(Natten2DSelfAttention):
         Input tensor of shape :math:`(B, L, D)`.
     latent_hw : Tuple[int, int]
         The height and width of the 2D latent space for reshaping.
-    invalid_token_mask : torch.Tensor, optional
-        See :class:`Natten2DSelfAttention`.
     rope_cos, rope_sin : torch.Tensor
         Axial 2D RoPE tables of shape :math:`(h, w, head\_dim)` from a
         :class:`~physicsnemo.nn.module.rope.RotaryEmbedding2DTables` provider.
-        Required; a :class:`ValueError` is raised if not supplied.
+        Required.
+    invalid_token_mask : torch.Tensor, optional
+        See :class:`Natten2DSelfAttention`.
 
     Outputs
     -------
@@ -608,23 +608,15 @@ class RopeNatten2DSelfAttention(Natten2DSelfAttention):
         self,
         x: Float[torch.Tensor, "batch sequence hidden_size"],
         latent_hw: Tuple[int, int],
+        rope_cos: Float[torch.Tensor, "h w head_dim"],
+        rope_sin: Float[torch.Tensor, "h w head_dim"],
         invalid_token_mask: Optional[
             Union[
                 Float[torch.Tensor, " sequence"],
                 Float[torch.Tensor, "batch sequence"],
             ]
         ] = None,
-        rope_cos: Optional[Float[torch.Tensor, "h w head_dim"]] = None,
-        rope_sin: Optional[Float[torch.Tensor, "h w head_dim"]] = None,
     ) -> Float[torch.Tensor, "batch sequence hidden_size"]:
-        if rope_cos is None or rope_sin is None:
-            raise ValueError(
-                "RopeNatten2DSelfAttention requires the rope_cos/rope_sin tables "
-                "to be passed to forward; they are owned by the top-level model's "
-                "RotaryEmbedding2DTables provider (the DiT 'natten2d_rope' backend "
-                "supplies them automatically). None were supplied."
-            )
-
         B, N, C = x.shape
         h, w = int(latent_hw[0]), int(latent_hw[1])
         if not torch.compiler.is_compiling():

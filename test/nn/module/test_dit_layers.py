@@ -172,7 +172,7 @@ def test_ditblock_natten_rope_and_mask_token_forward(device, pytestconfig):
     rope_kwargs = {"latent_hw": (H, W), "rope_cos": rope_cos, "rope_sin": rope_sin}
 
     # Omitting the tables is a clear error (the block cannot run standalone).
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError):
         block(
             torch.randn(B, T, hidden_size, device=device),
             torch.randn(B, hidden_size, device=device),
