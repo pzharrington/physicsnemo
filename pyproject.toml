@@ -28,7 +28,7 @@ dependencies = [
     "nvtx>=0.2.10",
     "treelib>=1.2.5",
     "numpy>=1.22.4",
-    "torch>=2.10.0",
+    "torch>=2.10.0,<2.13",
     "torchvision>=0.25.0a0",
     "tqdm>=4.60.0",
     "requests>=2.32.2",
@@ -239,7 +239,7 @@ dev = [
 # When neither is specified, torch comes from PyPI and no RAPIDS
 # packages are installed.
 cu13 = [
-    "torch>=2.10.0",
+    "torch>=2.10.0,<2.13",
     "torchvision>=0.25.0a0",
     "cuml-cu13>=26.2.0",
     "pylibraft-cu13>=26.2.0",
@@ -251,7 +251,7 @@ cu13 = [
     "nvidia-dali-cuda130",
 ]
 cu12 = [
-    "torch>=2.10.0",
+    "torch>=2.10.0,<2.13",
     "torchvision>=0.25.0a0",
     "cuml-cu12>=26.2.0",
     "pylibraft-cu12>=26.2.0",
