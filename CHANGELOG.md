@@ -253,9 +253,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cells, return self), matching its type hint and `slice_points`;
   `gaussian_curvature_cells` reuses the cached `gaussian_curvature_vertices`
   property instead of recomputing it.
-- `physicsnemo.mesh`: `validate_mesh(check_self_intersection=True)` now raises
+- `physicsnemo.mesh.Mesh` convenience methods now directly reuse shared
+  canonical functions, removing duplicate implementation bodies and docstrings.
+  This includes geometric, deformation (including radial-basis-function
+  deformation), calculus, topology, visualization, and validation operations.
+- `physicsnemo.mesh`: `draw` and `validate` are now the canonical standalone
+  names matching `Mesh.draw` and `Mesh.validate`. The `draw_mesh` and
+  `validate_mesh` remain as pending-deprecation compatibility names.
+  `Mesh.validate` and `DomainMesh.validate` share the canonical validation
+  option order, preserve the historical positional `tolerance` argument, and
+  expose the new `check_self_intersection` option as keyword-only.
+- `physicsnemo.mesh`: `validate(check_self_intersection=True)` now raises
   `NotImplementedError` (the check is unimplemented) instead of silently returning a
   `None` sentinel that masquerades as "no self-intersections found".
+- `physicsnemo.mesh` quality metrics now use a normalized
+  aspect ratio of longest edge to minimum altitude. The metric is dimensionless and
+  scale-invariant for simplices of every manifold dimension, and a regular
+  simplex now has `aspect_ratio=1` and `quality_score=1`. This intentionally
+  corrects the previous erroneous aspect-ratio and quality-score values.
+- `Mesh.quality_metrics` and `Mesh.statistics` again use explicit property
+  getters so their class-facing documentation describes argument-free property
+  access. Configurable statistics tolerance remains available through the
+  standalone `compute_mesh_statistics` function.
 - Performance improvements in the diffusion module: reduced peak memory of
   DPS-guided diffusion sampling most notably for multi-diffusion at large
   domains. A guided `sample()` loop run under `torch.no_grad()` now detaches the
