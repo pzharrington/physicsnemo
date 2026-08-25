@@ -334,6 +334,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `physicsnemo.mesh`: `validate(check_self_intersection=True)` now raises
   `NotImplementedError` (the check is unimplemented) instead of silently returning a
   `None` sentinel that masquerades as "no self-intersections found".
+- `Mesh.strip_caches` and `DomainMesh.strip_caches` now accept a `keep`
+  argument for retaining selected cache entries while clearing the rest.
+  `Mesh.with_points` and `Mesh.with_cells` provide cache-aware coordinate and
+  connectivity replacement for operations that preserve point or cell indexing,
+  while data-only mesh transforms now preserve valid geometry and topology caches
+  through `Mesh.with_data`.
 - `physicsnemo.mesh` quality metrics now use a normalized
   aspect ratio of longest edge to minimum altitude. The metric is dimensionless and
   scale-invariant for simplices of every manifold dimension, and a regular
