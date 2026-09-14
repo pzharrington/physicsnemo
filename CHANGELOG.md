@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in `Natten2DSelfAttention` and `RopeNatten2DSelfAttention`
+  with `qk_norm=True` mixing `LayerNorm` fp32 Q/K outputs with autocasted V
+  dtypes.
 - Normalizes cell, point, transformed, and partition-cluster mesh normals
   robustly across floating-point dtypes and scales. Zero vectors remain zero,
   small nonzero vectors retain unit length, and large finite vectors avoid
