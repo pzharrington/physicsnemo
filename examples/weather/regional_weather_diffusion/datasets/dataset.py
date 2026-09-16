@@ -264,9 +264,11 @@ class StormCastDataSource(ABC):
         return []
 
     def latitude(self) -> np.ndarray:
+        """Return a numpy array of the latitude of the data."""
         return np.full(self.image_shape(), np.nan)
 
     def longitude(self) -> np.ndarray:
+        """Return a numpy array of the longitude of the data."""
         return np.full(self.image_shape(), np.nan)
 
     def normalize_background(
