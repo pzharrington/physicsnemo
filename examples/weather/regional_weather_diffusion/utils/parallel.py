@@ -217,7 +217,9 @@ class ParallelHelper:
         Raises
         ------
         ValueError
-            If ``segments`` does not sum to ``num_samples``.
+            If ``segments`` does not sum to ``num_samples``, or if this rank
+            would own zero samples (which would otherwise hang the training
+            loop waiting on an index stream that never yields).
         """
         local_samples = local_shard_indices(
             num_samples,
@@ -225,6 +227,15 @@ class ParallelHelper:
             world_size=self.dist.world_size,
             segments=segments,
         )
+        if len(local_samples) == 0:
+            raise ValueError(
+                f"Rank {self.dist.rank} of {self.dist.world_size} would own 0 "
+                f"samples out of {num_samples} total (segments={segments}). "
+                "An empty rank-local shard would hang the training loop "
+                "waiting on an index stream that never yields. Reduce the "
+                "number of ranks, disable shard_by_domain, or grow the "
+                "dataset/segment so every rank has at least one sample."
+            )
 
         local_seed = None if seed is None else seed + self.dist.rank
         rng = np.random.default_rng(seed=local_seed)
